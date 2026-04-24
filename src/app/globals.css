@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace;
+  --color-accent: #BFFF00;
+  --color-accent-dim: #8FB300;
+  --color-surface: #111111;
+  --color-surface-2: #1A1A1A;
+  --color-surface-3: #222222;
+  --color-border: #2A2A2A;
+  --color-text-primary: #FFFFFF;
+  --color-text-secondary: #999999;
+  --color-text-tertiary: #666666;
+}
+
+html, body {
+  background: #000000;
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-surface-3) transparent;
+}
+
+input, textarea {
+  outline: none;
+}
+
+@keyframes pulse-dot {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+}
