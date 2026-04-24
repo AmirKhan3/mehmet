@@ -4,6 +4,7 @@ import { query } from "@/lib/db";
 import { getResolvedPlan, getTemplateForWeekday, getResolvedWeek, previewMoveSession } from "@/lib/tools/schedule";
 import { logWorkoutEntry, getWorkoutLogs, correctWorkoutEntry } from "@/lib/tools/workout";
 import { logNutritionItem, getNutritionDay, getNutritionTargetsVsActuals, correctNutritionEntry } from "@/lib/tools/nutrition";
+import { importRoutine, listRoutines, activateRoutine } from "@/lib/tools/routines";
 import type { Card, ChatToolRequest } from "@/types";
 
 const SINGLE_CALL_SYSTEM = `You are Strong — a concise fitness and nutrition assistant. Given the user message and context, return a single JSON response.
@@ -20,6 +21,8 @@ Available tools:
 - getNutritionTargetsVsActuals({"date":"today"}) → macro targets card
 - correctWorkoutEntry({"entry_id":null,"changes":{}}) → correction
 - correctNutritionEntry({"entry_id":null,"changes":{}}) → correction
+- listRoutines({}) → shows user's saved routines
+- activateRoutine({"routine_id":123}) → switches active routine
 
 Rules:
 - Coaching/general questions: tool=null, write a helpful reply in "narration"
@@ -123,6 +126,9 @@ async function dispatchTool(req: ChatToolRequest): Promise<Card | null> {
     case "getNutritionDay": return getNutritionDay(args as { date?: string });
     case "getNutritionTargetsVsActuals": return getNutritionTargetsVsActuals(args as { date?: string });
     case "correctNutritionEntry": return correctNutritionEntry(args as Parameters<typeof correctNutritionEntry>[0]);
+    case "listRoutines": return listRoutines();
+    case "activateRoutine": return activateRoutine(args as { routine_id: number });
+    case "importRoutine": return importRoutine(args as { text: string });
     default: return null;
   }
 }
@@ -137,10 +143,11 @@ async function logNutritionItemWithInlineMacros(args: Record<string, unknown>): 
   });
 }
 
-function toolDomain(tool: string): "schedule" | "workout" | "nutrition" | "meta" {
+function toolDomain(tool: string): "schedule" | "workout" | "nutrition" | "routine" | "meta" {
   if (["getResolvedPlan","getTemplateForWeekday","getResolvedWeek","previewMoveSession","previewDailyOverride"].includes(tool)) return "schedule";
   if (["logWorkoutEntry","getWorkoutLogs","correctWorkoutEntry"].includes(tool)) return "workout";
   if (["logNutritionItem","getNutritionDay","getNutritionTargetsVsActuals","correctNutritionEntry"].includes(tool)) return "nutrition";
+  if (["listRoutines","activateRoutine","importRoutine"].includes(tool)) return "routine";
   return "meta";
 }
 

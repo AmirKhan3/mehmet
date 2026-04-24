@@ -4,6 +4,7 @@ import type { Card } from "@/types";
 import { SchedulePlanDetail } from "./SchedulePlanCard";
 import { WorkoutLogsDetail, WorkoutLoggedDetail } from "./WorkoutCard";
 import { NutritionTargetsDetail, NutritionDayDetail, NutritionItemDetail } from "./NutritionCard";
+import { RoutineImportPreviewDetail, RoutineListDetail, RoutineDetailView } from "./RoutineCard";
 
 interface Props {
   card: Card | null;
@@ -77,6 +78,12 @@ function DetailContent({ card }: { card: Card }) {
       return <NutritionDayDetail card={card} />;
     case "nutrition_targets_vs_actuals":
       return <NutritionTargetsDetail card={card} />;
+    case "routine_import_preview":
+      return <RoutineImportPreviewDetail card={card} />;
+    case "routine_list":
+      return <RoutineListDetail card={card} />;
+    case "routine_detail":
+      return <RoutineDetailView card={card} />;
     default:
       return (
         <div className="p-6">

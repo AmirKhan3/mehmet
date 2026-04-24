@@ -7,10 +7,13 @@ export type UserJob =
   | "view_nutrition"
   | "correct_workout"
   | "correct_nutrition"
+  | "import_routine"
+  | "list_routines"
+  | "activate_routine"
   | "coaching"
   | "general";
 
-export type Domain = "schedule" | "workout" | "nutrition" | "meta";
+export type Domain = "schedule" | "workout" | "nutrition" | "routine" | "meta";
 
 export type CardType =
   | "schedule_plan"
@@ -24,7 +27,52 @@ export type CardType =
   | "nutrition_day"
   | "nutrition_targets_vs_actuals"
   | "nutrition_corrected"
+  | "routine_import_preview"
+  | "routine_list"
+  | "routine_detail"
   | "confirmation";
+
+export interface ParsedExercise {
+  name_raw: string;
+  sets?: number | null;
+  reps_min?: number | null;
+  reps_max?: number | null;
+  tempo?: string | null;
+  rir_min?: number | null;
+  rir_max?: number | null;
+  load_notes?: string | null;
+  duration_sec?: number | null;
+  is_amrap?: boolean;
+}
+
+export interface ParsedBlock {
+  block_type: "straight" | "circuit" | "amrap" | "superset";
+  rounds?: number | null;
+  rest_between_exercises_sec?: number | null;
+  rest_between_rounds_sec?: number | null;
+  notes?: string | null;
+  exercises: ParsedExercise[];
+}
+
+export interface ParsedDay {
+  day_index: number;
+  name: string;
+  session_type: string;
+  is_rest_day: boolean;
+  notes?: string | null;
+  blocks: ParsedBlock[];
+}
+
+export interface ParsedRoutine {
+  name: string;
+  schedule_mode: "weekday" | "cycle";
+  phase_label?: string | null;
+  days: ParsedDay[];
+}
+
+export interface ParsedRoutineResult {
+  routines: ParsedRoutine[];
+}
 
 export interface ChatToolRequest {
   domain: Domain;

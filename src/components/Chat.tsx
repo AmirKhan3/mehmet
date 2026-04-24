@@ -74,12 +74,14 @@ export function Chat() {
           <div className="text-[11px] font-semibold tracking-[0.2em] text-[#BFFF00] uppercase">Strong</div>
           <div className="text-[13px] text-[#444]">Training partner</div>
         </div>
-        <button className="w-8 h-8 rounded-full bg-[#111] border border-[#222] flex items-center justify-center">
+        <a href="/routines" className="w-8 h-8 rounded-full bg-[#111] border border-[#222] flex items-center justify-center">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <circle cx="7" cy="5" r="2.5" stroke="#666" strokeWidth="1.2" />
-            <path d="M2 13c0-2.76 2.24-5 5-5s5 2.24 5 5" stroke="#666" strokeWidth="1.2" strokeLinecap="round" />
+            <rect x="2" y="2" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
+            <rect x="8" y="2" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
+            <rect x="2" y="8" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
+            <rect x="8" y="8" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
           </svg>
-        </button>
+        </a>
       </div>
 
       {/* Messages */}
@@ -93,7 +95,7 @@ export function Chat() {
               Ask about your schedule, log a workout, or track nutrition.
             </div>
             <div className="mt-8 grid grid-cols-1 gap-2 w-full max-w-xs">
-              {["What's my workout today?", "Log 2 eggs", "How am I doing?"].map((q) => (
+              {["What's my workout today?", "Log 2 eggs", "Show my routines"].map((q) => (
                 <button
                   key={q}
                   onClick={() => send(q)}

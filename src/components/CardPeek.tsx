@@ -4,6 +4,7 @@ import { SchedulePlanCard } from "./SchedulePlanCard";
 import { WorkoutLoggedCard, WorkoutLogsCard } from "./WorkoutCard";
 import { NutritionItemCard, NutritionDayCard, NutritionTargetsCard } from "./NutritionCard";
 import { ConfirmationCard } from "./ConfirmationCard";
+import { RoutineImportPreviewCard, RoutineListCard } from "./RoutineCard";
 
 interface Props {
   card: Card;
@@ -54,6 +55,10 @@ function CardContent({ card, onConfirm }: { card: Card; onConfirm?: () => void }
       return <PreviewCard card={card} />;
     case "confirmation":
       return <ConfirmationCard card={card} onConfirm={onConfirm} />;
+    case "routine_import_preview":
+      return <RoutineImportPreviewCard card={card} />;
+    case "routine_list":
+      return <RoutineListCard card={card} />;
     default:
       return <div className="text-[13px] text-[#666]">{JSON.stringify(card.data).slice(0, 100)}</div>;
   }
