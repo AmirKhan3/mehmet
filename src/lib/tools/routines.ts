@@ -114,6 +114,7 @@ export async function importRoutine(args: { text: string }): Promise<Card> {
   try {
     parsed = await parseRoutine(text);
   } catch (err) {
+    console.error("[importRoutine] parse failed:", err);
     return {
       type: "routine_import_preview",
       title: "Parse Error",

@@ -39,77 +39,105 @@ export async function chatCompletionJSON<T>(
   return JSON.parse(cleaned);
 }
 
-const ROUTINE_PARSER_SYSTEM = `You are a fitness routine parser. Parse the workout routine text into structured JSON.
+// Keep only structural exercise content; drop coaching-cue prose paragraphs.
+// Uses positive matching: a line is kept if it IS structural, not by trying to detect narrative.
+function preprocessRoutineText(text: string): string {
+  // Patterns that positively identify exercise/structure lines
+  const IS_STRUCTURAL = [
+    /^#/,                          // markdown headings
+    /^\*\*/,                       // bold (block headers, day labels)
+    /^---/,                        // horizontal rules
+    /\|\s*Tempo/i,                 // Akhara: "Exercise — N reps | Tempo X-X-X"
+    /\|\s*Static/i,                // Akhara: timed holds "— 45 sec | Static"
+    /—\s*\d+\s*(reps?|each|sec)/i, // "— 12 reps", "— 45 sec", "— 12 each"
+    /\d+[×xX]\d+/,                 // "4×5–8" (Nippard), "3x6-8" (PPL)
+    /\d+\s*sets?\s*[x×]\s*\d+/i,   // "3 sets x 6-8 reps" (PPL)
+    /\b(Block|Circuit|Part\s+[AB])\s*\d/i, // "Block 1", "Circuit A", "Part B"
+    /\b\d+\s*rounds?\b/i,          // "4 rounds", "5 rounds"
+    /\bRest\s+\d+\s*sec\b/i,       // "Rest 15 sec between..."
+    /\bAMRAP\b/i,                  // AMRAP format
+    /\bWeek\s+\d/i,                // "Week 5+", "Week A", "Week 1-4"
+    /\bDay\s+\d/i,                 // "Day 1", "Day 2"
+    /:\s*\d+\s*sets?\s/i,          // "Bench Press: 3 sets"
+    /,\s*RIR\d/i,                  // "4×5–8, tempo 3-1-1, RIR2"
+    /\bWork\s+\d+\s*sec\b/i,       // "Work 40 sec"
+  ];
 
-Output ONLY valid JSON in this exact shape (no markdown fences):
-{
-  "routines": [
-    {
-      "name": "string — program name, include phase label if applicable e.g. 'Akhara Protocol — Week 1-4'",
-      "schedule_mode": "weekday OR cycle",
-      "phase_label": "string or null — e.g. 'Week 1-4', 'Week A', null",
-      "days": [
-        {
-          "day_index": 0,
-          "name": "string — e.g. 'Monday — Upper Push' or 'Push Workout'",
-          "session_type": "string — e.g. 'push', 'pull', 'lower-quad', 'upper'",
-          "is_rest_day": false,
-          "notes": "string or null",
-          "blocks": [
-            {
-              "block_type": "straight OR circuit OR amrap OR superset",
-              "rounds": null,
-              "rest_between_exercises_sec": null,
-              "rest_between_rounds_sec": null,
-              "notes": "string or null",
-              "exercises": [
-                {
-                  "name_raw": "exact exercise text including substitutions",
-                  "sets": null,
-                  "reps_min": null,
-                  "reps_max": null,
-                  "tempo": null,
-                  "rir_min": null,
-                  "rir_max": null,
-                  "load_notes": null,
-                  "duration_sec": null,
-                  "is_amrap": false
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    }
-  ]
+  return text
+    .split("\n")
+    .filter((line) => {
+      const t = line.trim();
+      if (!t) return true; // keep blank lines for readability
+      if (t.length <= 60) return true; // short lines are always structural
+      return IS_STRUCTURAL.some((re) => re.test(t));
+    })
+    .join("\n");
 }
 
-PARSING RULES:
-1. schedule_mode: 'weekday' if days named Monday/Tuesday etc; 'cycle' if numbered (Day 1, Day 2) or named by role (Push, Pull, Legs).
-2. Weekday day_index: Sun=0, Mon=1, Tue=2, Wed=3, Thu=4, Fri=5, Sat=6.
-3. Cycle day_index: assign 0,1,2... in order of appearance.
-4. Multi-phase: if text has distinct phases like 'Week 1-4' vs 'Week 5+' OR 'Week A' vs 'Week B' → emit one entry per phase in routines[]. Each phase shares a base name but has different phase_label.
-5. block_type: 'circuit' when header says Block N, Mini-Circuit, or explicitly mentions N rounds of grouped exercises. 'amrap' when AMRAP. 'straight' when each exercise is performed independently with its own rest.
-6. rounds: the circuit rounds count (4 rounds, 5 rounds). NOT sets.
-7. reps: '6-8 reps' → reps_min=6,reps_max=8. '10 reps' → reps_min=10,reps_max=10. '20' → reps_min=20,reps_max=20.
-8. sets: for straight blocks, capture explicit sets. For circuit exercises, sets=null (rounds handles it).
-9. tempo: capture '3-1-1', '2-2-1' verbatim in tempo field.
-10. rir: 'RIR2' → rir_min=2,rir_max=2. 'RIR1-2' → rir_min=1,rir_max=2.
-11. duration_sec: 'hold 45 sec' or '40 sec' timed work → duration_sec=45.
-12. is_amrap: true only for AMRAP exercises where you do max reps.
-13. rest_between_exercises_sec: 'rest 15 sec between exercises' → 15.
-14. rest_between_rounds_sec: 'rest 75 sec between rounds' → 75.
-15. name_raw: keep full original text e.g. 'Pull-ups (sub: pulldowns)'.
-16. Omit rest-only days (pure walking/mobility days with no structured exercise blocks).
-17. For alternating-week exercises within a single day (Week A: X, Week B: Y), split into two phases.
-18. load_notes: 'RPE8', 'bodyweight', 'heavy', 'grip one horn' etc.`;
+const ROUTINE_PARSER_SYSTEM = `You are a fitness routine parser. Parse the workout routine text into compact JSON.
+
+IMPORTANT: Output ONLY raw JSON (no markdown fences). Omit any field that is null, false, or 0 — only include fields with real values. This keeps the output small.
+
+Schema:
+{
+  "routines": [{
+    "name": string,
+    "schedule_mode": "weekday"|"cycle",
+    "phase_label": string,          // only if there are phases
+    "days": [{
+      "day_index": number,
+      "name": string,
+      "session_type": string,
+      "is_rest_day": true,          // only include when true
+      "blocks": [{
+        "block_type": "straight"|"circuit"|"amrap"|"superset",
+        "rounds": number,           // only for circuits
+        "rest_between_exercises_sec": number,
+        "rest_between_rounds_sec": number,
+        "exercises": [{
+          "name_raw": string,
+          "sets": number,
+          "reps_min": number,
+          "reps_max": number,
+          "tempo": string,
+          "rir_min": number,
+          "rir_max": number,
+          "load_notes": string,
+          "duration_sec": number,
+          "is_amrap": true          // only include when true
+        }]
+      }]
+    }]
+  }]
+}
+
+RULES:
+1. schedule_mode: 'weekday' if days are Mon/Tue/etc; 'cycle' if Day 1/Day 2 or Push/Pull/Legs.
+2. Weekday day_index: Sun=0 Mon=1 Tue=2 Wed=3 Thu=4 Fri=5 Sat=6.
+3. Cycle day_index: 0,1,2... in appearance order.
+4. Multi-phase (Week 1-4 vs Week 5+, Week A vs Week B): emit one routines[] entry per phase, each with its own phase_label.
+5. block_type circuit: section says "Block N", "Mini-Circuit", or "N rounds". straight: independent exercises with own rest. amrap: AMRAP format.
+6. rounds: circuit round count only (not sets).
+7. reps: "6-8 reps"→reps_min=6,reps_max=8. "12 reps"→reps_min=12,reps_max=12.
+8. sets: explicit sets count for straight blocks. Omit for circuit exercises (rounds covers repetition).
+9. tempo: "3-1-1" verbatim.
+10. rir: "RIR2"→rir_min=2,rir_max=2. "RIR1-2"→rir_min=1,rir_max=2.
+11. duration_sec: timed holds like "45 sec" or "40 sec work".
+12. rest_between_exercises_sec: "rest 15 sec between exercises"→15.
+13. rest_between_rounds_sec: "rest 75 sec between rounds"→75.
+14. name_raw: exact exercise name including any substitution note e.g. "Pull-ups (sub: pulldowns)".
+15. Skip pure rest/walk days (no exercise blocks).
+16. For alternating weeks within one day (Week A: X, Week B: Y) → split into two routines[].`;
 
 export async function parseRoutine(text: string): Promise<import("@/types").ParsedRoutineResult> {
+  const processed = preprocessRoutineText(text);
+  console.log(`[parseRoutine] Original: ${text.length} chars → Preprocessed: ${processed.length} chars`);
+
   return chatCompletionJSON<import("@/types").ParsedRoutineResult>(
     [
       { role: "system", content: ROUTINE_PARSER_SYSTEM },
-      { role: "user", content: text },
+      { role: "user", content: processed },
     ],
-    { temperature: 0.1, max_tokens: 6000 }
+    { temperature: 0.1, max_tokens: 8000 }
   );
 }
