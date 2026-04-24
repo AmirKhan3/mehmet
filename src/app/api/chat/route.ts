@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
   if (decision.tool) {
     try {
       const toolReq: ChatToolRequest = {
-        domain: "schedule",
+        domain: toolDomain(decision.tool),
         tool: decision.tool,
         args: decision.args || {},
         confidence: 0.9,
@@ -135,6 +135,13 @@ async function logNutritionItemWithInlineMacros(args: Record<string, unknown>): 
     date: args.date as string | undefined,
     inlineMacros: macros,
   });
+}
+
+function toolDomain(tool: string): "schedule" | "workout" | "nutrition" | "meta" {
+  if (["getResolvedPlan","getTemplateForWeekday","getResolvedWeek","previewMoveSession","previewDailyOverride"].includes(tool)) return "schedule";
+  if (["logWorkoutEntry","getWorkoutLogs","correctWorkoutEntry"].includes(tool)) return "workout";
+  if (["logNutritionItem","getNutritionDay","getNutritionTargetsVsActuals","correctNutritionEntry"].includes(tool)) return "nutrition";
+  return "meta";
 }
 
 function isDestructive(message: string): boolean {

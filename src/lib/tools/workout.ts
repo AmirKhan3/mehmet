@@ -35,12 +35,13 @@ export async function logWorkoutEntry(args: {
     );
 
     const exerciseId = catalogRow?.id || null;
+    const dedup = `${date}:${exerciseId ?? ex.name}:${ex.sets ?? 1}:${ex.reps ?? 0}`;
 
     await query(
-      `INSERT INTO workout_logs (athlete_profile_id, date, exercise_id, sets, reps, status, modifier, source_message_id)
+      `INSERT INTO workout_logs (athlete_profile_id, date, exercise_id, sets, reps, status, modifier, dedup_key)
        VALUES (1, $1, $2, $3, $4, 'completed', $5, $6)
        ON CONFLICT (dedup_key) DO NOTHING`,
-      [date, exerciseId, ex.sets || 1, ex.reps || 0, ex.modifier || null, `msg-${Date.now()}`]
+      [date, exerciseId, ex.sets || 1, ex.reps || 0, ex.modifier || null, dedup]
     );
 
     logged.push({ name: ex.name, sets: ex.sets || 1, reps: ex.reps || 0 });
@@ -60,7 +61,7 @@ export async function getWorkoutLogs(args: { date?: string }): Promise<Card> {
     `SELECT wl.*, ec.name as exercise_name
      FROM workout_logs wl
      LEFT JOIN exercise_catalog ec ON ec.id = wl.exercise_id
-     WHERE wl.date = $1
+     WHERE wl.athlete_profile_id = 1 AND wl.date = $1
      ORDER BY wl.id`,
     [date]
   );
@@ -70,7 +71,7 @@ export async function getWorkoutLogs(args: { date?: string }): Promise<Card> {
      FROM schedule_templates st
      JOIN schedule_template_exercises ste ON ste.template_id = st.id
      JOIN exercise_catalog ec ON ec.id = ste.exercise_id
-     WHERE st.weekday = $1`,
+     WHERE st.athlete_profile_id = 1 AND st.weekday = $1`,
     [new Date(date + "T12:00:00").getDay()]
   );
 

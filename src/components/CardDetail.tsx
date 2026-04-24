@@ -2,8 +2,8 @@
 import { motion, AnimatePresence, PanInfo } from "framer-motion";
 import type { Card } from "@/types";
 import { SchedulePlanDetail } from "./SchedulePlanCard";
-import { WorkoutLogsDetail } from "./WorkoutCard";
-import { NutritionTargetsDetail } from "./NutritionCard";
+import { WorkoutLogsDetail, WorkoutLoggedDetail } from "./WorkoutCard";
+import { NutritionTargetsDetail, NutritionDayDetail, NutritionItemDetail } from "./NutritionCard";
 
 interface Props {
   card: Card | null;
@@ -63,12 +63,20 @@ function DetailContent({ card }: { card: Card }) {
     case "schedule_plan":
     case "weekday_template":
       return <SchedulePlanDetail card={card} />;
-    case "workout_logs":
-      return <WorkoutLogsDetail card={card} />;
-    case "nutrition_targets_vs_actuals":
-      return <NutritionTargetsDetail card={card} />;
     case "schedule_week":
       return <WeekDetail card={card} />;
+    case "workout_logged":
+    case "workout_corrected":
+      return <WorkoutLoggedDetail card={card} />;
+    case "workout_logs":
+      return <WorkoutLogsDetail card={card} />;
+    case "nutrition_item_logged":
+    case "nutrition_corrected":
+      return <NutritionItemDetail card={card} />;
+    case "nutrition_day":
+      return <NutritionDayDetail card={card} />;
+    case "nutrition_targets_vs_actuals":
+      return <NutritionTargetsDetail card={card} />;
     default:
       return (
         <div className="p-6">

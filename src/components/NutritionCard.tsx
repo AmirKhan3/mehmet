@@ -108,6 +108,68 @@ export function NutritionTargetsCard({ card }: { card: Card }) {
   );
 }
 
+export function NutritionItemDetail({ card }: { card: Card }) {
+  const d = card.data as NutritionItemData;
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <div className="text-xs font-semibold tracking-widest text-[#BFFF00] uppercase mb-1">Logged</div>
+        <div className="text-2xl font-bold text-white">{d.item}</div>
+        <div className="text-[14px] text-[#666] mt-1">{d.quantity}</div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {[
+          { label: "Calories", value: d.calories, unit: "kcal" },
+          { label: "Protein", value: d.protein_g, unit: "g" },
+          { label: "Carbs", value: d.carbs_g, unit: "g" },
+          { label: "Fat", value: d.fat_g, unit: "g" },
+        ].map((m) => (
+          <div key={m.label} className="bg-[#111] border border-[#1A1A1A] rounded-xl p-3">
+            <div className="text-[11px] text-[#666] uppercase tracking-wide">{m.label}</div>
+            <div className="text-[20px] font-bold font-mono text-white mt-1">
+              {Math.round(m.value ?? 0)}<span className="text-[12px] text-[#666] ml-0.5">{m.unit}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function NutritionDayDetail({ card }: { card: Card }) {
+  const d = card.data as NutritionDayData;
+  const t = d.totals;
+  const entries = Array.isArray(d.entries) ? d.entries : [];
+
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <div className="text-xs font-semibold tracking-widest text-[#BFFF00] uppercase mb-1">Nutrition</div>
+        <div className="text-2xl font-bold text-white">{card.title}</div>
+      </div>
+      {t && (
+        <div className="text-[28px] font-bold font-mono">
+          {Math.round(t.calories)} <span className="text-[16px] text-[#666] font-normal">kcal</span>
+        </div>
+      )}
+      <div className="space-y-2">
+        {entries.map((e, i) => (
+          <div key={i} className="flex items-baseline justify-between py-2.5 border-b border-[#1A1A1A]">
+            <div>
+              <div className="text-[14px] font-medium text-white">{(e as Record<string, unknown>).item_name as string}</div>
+              <div className="text-[11px] text-[#666]">{(e as Record<string, unknown>).quantity as string}</div>
+            </div>
+            <div className="text-right ml-4">
+              <div className="text-[13px] font-mono text-white">{Math.round((e as Record<string, unknown>).calories as number)} kcal</div>
+              <div className="text-[11px] text-[#666]">{Math.round((e as Record<string, unknown>).protein_g as number)}g protein</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function NutritionTargetsDetail({ card }: { card: Card }) {
   const d = card.data as TargetsData;
   const a = d.actuals;

@@ -83,6 +83,36 @@ export function WorkoutLogsCard({ card }: { card: Card }) {
   );
 }
 
+export function WorkoutLoggedDetail({ card }: { card: Card }) {
+  const d = card.data as WorkoutLoggedData;
+  const exercises = Array.isArray(d.exercises) ? d.exercises : [];
+
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <div className="text-xs font-semibold tracking-widest text-[#BFFF00] uppercase mb-1">Logged</div>
+        <div className="text-2xl font-bold text-white">{card.title}</div>
+        {d.source_session && (
+          <div className="text-[13px] text-[#666] mt-1">{d.source_session} plan</div>
+        )}
+      </div>
+      <div className="space-y-3">
+        {exercises.map((ex, i) => (
+          <div key={i} className="flex items-center justify-between py-3 border-b border-[#1A1A1A]">
+            <span className="text-[15px] font-medium text-white">{ex.name}</span>
+            <span className="text-[14px] font-mono text-[#BFFF00]">
+              {ex.sets && ex.reps ? `${ex.sets}×${ex.reps}` : ""}
+            </span>
+          </div>
+        ))}
+        {exercises.length === 0 && (
+          <div className="text-[14px] text-[#666]">Session logged from template</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function WorkoutLogsDetail({ card }: { card: Card }) {
   const d = card.data as WorkoutLogsData;
   const logs = Array.isArray(d.logs) ? d.logs : [];
