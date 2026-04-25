@@ -108,7 +108,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ text: decision.narration, cards });
+  // Guard: prevent narration claiming a log succeeded when no card was produced.
+  // Covers: no tool ran (hallucination) and tool ran but threw (silent failure).
+  // "saved" excluded — too broad, matches non-log contexts like "session preferences saved".
+  let narration = decision.narration;
+  if (cards.length === 0) {
+    const logClaim = /\b(logged|recorded)\b/i.test(narration) &&
+      /\b(workout|sets?|reps?|exercise)\b/i.test(narration);
+    if (logClaim) {
+      narration = "I didn't log anything yet — could you tell me which exercises you completed and how many sets/reps?";
+    }
+  }
+
+  return NextResponse.json({ text: narration, cards });
 }
 
 async function dispatchTool(req: ChatToolRequest): Promise<Card | null> {

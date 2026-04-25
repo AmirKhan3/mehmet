@@ -109,19 +109,27 @@ export function SchedulePlanDetail({ card }: { card: Card }) {
       ) : hasBlocks ? (
         <div className="space-y-6">
           {blocks.map((block, bi) => {
-            const isCircuit = block.block_type === "circuit" || block.block_type === "superset";
+            const isCircuit = block.block_type === "circuit" || block.block_type === "superset" || block.block_type === "amrap";
             const blockExercises = block.exercises || [];
             return (
               <div key={bi} className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-semibold tracking-widest text-[#555] uppercase">
-                    {isCircuit ? `Block ${bi + 1}` : "Exercises"}
-                  </span>
-                  {isCircuit && block.rounds && (
-                    <span className="text-[11px] text-[#444]">{block.rounds} rounds</span>
-                  )}
-                  {block.rest_between_rounds_sec && (
-                    <span className="text-[11px] text-[#333]">{block.rest_between_rounds_sec}s rest</span>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-semibold tracking-widest text-[#555] uppercase">
+                      Block {bi + 1}
+                    </span>
+                    {block.rounds && (
+                      <span className="text-[11px] text-[#444]">{block.rounds} rounds</span>
+                    )}
+                    {block.rest_between_exercises_sec && (
+                      <span className="text-[11px] text-[#333]">{block.rest_between_exercises_sec}s between exercises</span>
+                    )}
+                    {block.rest_between_rounds_sec && (
+                      <span className="text-[11px] text-[#333]">{block.rest_between_rounds_sec}s between rounds</span>
+                    )}
+                  </div>
+                  {block.notes && (
+                    <div className="text-[11px] text-[#444] italic">{block.notes}</div>
                   )}
                 </div>
                 {blockExercises.map((ex, ei) => (

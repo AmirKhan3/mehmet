@@ -26,6 +26,7 @@ export default function RoutinesPage() {
   const [preview, setPreview] = useState<Card | null>(null);
   const [routines, setRoutines] = useState<RoutineSummary[]>([]);
   const [activating, setActivating] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -55,6 +56,20 @@ export default function RoutinesPage() {
       if (data.card) setPreview(data.card);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleDelete(routineId: number) {
+    setDeleting(routineId);
+    try {
+      await fetch("/api/routines/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ routine_id: routineId }),
+      });
+      await fetchRoutines();
+    } finally {
+      setDeleting(null);
     }
   }
 
@@ -217,18 +232,32 @@ export default function RoutinesPage() {
                         {" · "}{r.day_count} days
                       </div>
                     </div>
-                    {r.status !== "active" && (
+                    <div className="flex items-center gap-2">
+                      {r.status !== "active" && (
+                        <button
+                          onClick={() => handleActivate(r.id)}
+                          disabled={activating === r.id}
+                          className="text-[12px] text-[#BFFF00] border border-[#BFFF00]/30 rounded-lg px-3 py-1.5 disabled:opacity-50"
+                        >
+                          {activating === r.id ? "…" : "Activate"}
+                        </button>
+                      )}
+                      {r.status === "active" && (
+                        <span className="text-[11px] font-semibold text-[#BFFF00]">Active</span>
+                      )}
                       <button
-                        onClick={() => handleActivate(r.id)}
-                        disabled={activating === r.id}
-                        className="text-[12px] text-[#BFFF00] border border-[#BFFF00]/30 rounded-lg px-3 py-1.5 disabled:opacity-50"
+                        onClick={() => handleDelete(r.id)}
+                        disabled={deleting === r.id}
+                        className="text-[#444] hover:text-red-500 transition-colors disabled:opacity-30 p-1"
+                        title="Delete"
                       >
-                        {activating === r.id ? "…" : "Activate"}
+                        {deleting === r.id ? "…" : (
+                          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M2 4h12M5 4V2h6v2M6 7v5M10 7v5M3 4l1 9h8l1-9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        )}
                       </button>
-                    )}
-                    {r.status === "active" && (
-                      <span className="text-[11px] font-semibold text-[#BFFF00]">Active</span>
-                    )}
+                    </div>
                   </div>
                 ))}
               </div>

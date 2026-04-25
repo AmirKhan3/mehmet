@@ -74,14 +74,21 @@ export function Chat() {
           <div className="text-[11px] font-semibold tracking-[0.2em] text-[#BFFF00] uppercase">Strong</div>
           <div className="text-[13px] text-[#444]">Training partner</div>
         </div>
-        <a href="/routines" className="w-8 h-8 rounded-full bg-[#111] border border-[#222] flex items-center justify-center">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <rect x="2" y="2" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
-            <rect x="8" y="2" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
-            <rect x="2" y="8" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
-            <rect x="8" y="8" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
-          </svg>
-        </a>
+        <div className="flex items-center gap-2">
+          <a href="/logs" className="w-8 h-8 rounded-full bg-[#111] border border-[#222] flex items-center justify-center" title="Logs">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M2 4h10M2 7h7M2 10h5" stroke="#666" strokeWidth="1.2" strokeLinecap="round"/>
+            </svg>
+          </a>
+          <a href="/routines" className="w-8 h-8 rounded-full bg-[#111] border border-[#222] flex items-center justify-center" title="Routines">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <rect x="2" y="2" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
+              <rect x="8" y="2" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
+              <rect x="2" y="8" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
+              <rect x="8" y="8" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
+            </svg>
+          </a>
+        </div>
       </div>
 
       {/* Messages */}
