@@ -129,8 +129,8 @@ function repsLabel(ex: BlockEx): string {
   return "";
 }
 
-function BlockSection({ block, index }: { block: Block; index: number }) {
-  const isCircuit = block.block_type === "circuit" || block.block_type === "superset";
+export function BlockSection({ block, index }: { block: Block; index: number }) {
+  const isCircuit = block.block_type === "circuit" || block.block_type === "superset" || block.block_type === "amrap";
   const exercises = block.exercises || [];
 
   return (
