@@ -9,30 +9,65 @@ function genId() {
   return Math.random().toString(36).slice(2);
 }
 
-const STORAGE_KEY = "strong_chat_messages";
-const MAX_STORED = 60;
+async function fetchMessages(): Promise<Message[]> {
+  const res = await fetch("/api/chat/messages");
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.messages || []) as Message[];
+}
 
 export function Chat() {
-  const [messages, setMessages] = useState<Message[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? (JSON.parse(raw) as Message[]) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [detailCard, setDetailCard] = useState<Card | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const stopPoll = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  // Load history on mount, then poll briefly if the latest message is an orphan
+  // user message (LLM may still be processing from a prior page).
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages.slice(-MAX_STORED)));
-    } catch {}
-  }, [messages]);
+    let cancelled = false;
+
+    (async () => {
+      const initial = await fetchMessages();
+      if (cancelled) return;
+      setMessages(initial);
+
+      const last = initial[initial.length - 1];
+      if (last?.role === "user") {
+        setLoading(true);
+        let attempts = 0;
+        pollTimerRef.current = setInterval(async () => {
+          attempts += 1;
+          const next = await fetchMessages();
+          if (cancelled) return;
+          const newLast = next[next.length - 1];
+          if (newLast?.role === "assistant") {
+            setMessages(next);
+            setLoading(false);
+            stopPoll();
+          } else if (attempts >= 20) {
+            setLoading(false);
+            stopPoll();
+          }
+        }, 1500);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      stopPoll();
+    };
+  }, [stopPoll]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -41,6 +76,7 @@ export function Chat() {
   const send = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || loading) return;
+    stopPoll();
 
     const userMsg: Message = { id: genId(), role: "user", text: trimmed, timestamp: Date.now() };
     setMessages((prev) => [...prev, userMsg]);
@@ -72,7 +108,7 @@ export function Chat() {
     } finally {
       setLoading(false);
     }
-  }, [messages, loading]);
+  }, [messages, loading, stopPoll]);
 
   function handleKey(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {

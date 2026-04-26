@@ -46,20 +46,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Empty message" }, { status: 400 });
   }
 
+  // Persist user message first so it's never lost if the LLM call fails or the client disconnects.
+  await query(
+    `INSERT INTO chat_messages (role, text, cards_json) VALUES ('user', $1, '[]'::jsonb)`,
+    [message]
+  );
+
   if (isDestructive(message)) {
     const expires = new Date(Date.now() + 5 * 60 * 1000).toISOString();
     await query(
       `INSERT INTO pending_actions (type, payload, expires_at) VALUES ($1, $2, $3)`,
       ["clear_day", JSON.stringify({ message }), expires]
     );
-    return NextResponse.json({
-      text: "Are you sure? This will delete all of today's logs. Reply 'yes' to confirm.",
-      cards: [{
-        type: "confirmation",
-        title: "Confirm Delete",
-        data: { action: "clear_day", message: "Delete today's workout and nutrition logs?", expires_at: expires },
-      }],
-    });
+    const text = "Are you sure? This will delete all of today's logs. Reply 'yes' to confirm.";
+    const cards = [{
+      type: "confirmation",
+      title: "Confirm Delete",
+      data: { action: "clear_day", message: "Delete today's workout and nutrition logs?", expires_at: expires },
+    }];
+    await query(
+      `INSERT INTO chat_messages (role, text, cards_json) VALUES ('assistant', $1, $2::jsonb)`,
+      [text, JSON.stringify(cards)]
+    );
+    return NextResponse.json({ text, cards });
   }
 
   const recentContext = history
@@ -87,6 +96,10 @@ export async function POST(req: NextRequest) {
         { role: "user", content: message },
       ],
       { temperature: 0.7, max_tokens: 256 }
+    );
+    await query(
+      `INSERT INTO chat_messages (role, text, cards_json) VALUES ('assistant', $1, '[]'::jsonb)`,
+      [fallback]
     );
     return NextResponse.json({ text: fallback, cards: [] });
   }
@@ -119,6 +132,11 @@ export async function POST(req: NextRequest) {
       narration = "I didn't log anything yet — could you tell me which exercises you completed and how many sets/reps?";
     }
   }
+
+  await query(
+    `INSERT INTO chat_messages (role, text, cards_json) VALUES ('assistant', $1, $2::jsonb)`,
+    [narration, JSON.stringify(cards)]
+  );
 
   return NextResponse.json({ text: narration, cards });
 }
