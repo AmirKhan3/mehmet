@@ -16,11 +16,16 @@ async function fetchMessages(): Promise<Message[]> {
   return (data.messages || []) as Message[];
 }
 
+const DEFAULT_STARTERS = ["What's my workout today?", "Log 2 eggs", "Show my routines"];
+
 export function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [detailCard, setDetailCard] = useState<Card | null>(null);
+  const [pendingImage, setPendingImage] = useState<File | null>(null);
+  const [pendingImageUrl, setPendingImageUrl] = useState<string | null>(null);
+  const [starters, setStarters] = useState<string[]>(DEFAULT_STARTERS);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -31,6 +36,23 @@ export function Chat() {
       clearInterval(pollTimerRef.current);
       pollTimerRef.current = null;
     }
+  }, []);
+
+  // Revoke object URL when it changes to avoid memory leaks.
+  useEffect(() => {
+    return () => {
+      if (pendingImageUrl) URL.revokeObjectURL(pendingImageUrl);
+    };
+  }, [pendingImageUrl]);
+
+  // Fetch contextual starters on mount — falls back to defaults on error.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/chat/starters")
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled && Array.isArray(d.starters) && d.starters.length > 0) setStarters(d.starters); })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   // Load history on mount, then poll briefly if the latest message is an orphan
@@ -74,77 +96,91 @@ export function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const clearPendingImage = useCallback(() => {
+    setPendingImage(null);
+    setPendingImageUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  }, []);
+
+  const setPendingImageFile = useCallback((file: File) => {
+    setPendingImageUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
+    setPendingImage(file);
+  }, []);
+
   const send = useCallback(async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed || loading) return;
+    if ((!trimmed && !pendingImage) || loading) return;
     stopPoll();
 
-    const userMsg: Message = { id: genId(), role: "user", text: trimmed, timestamp: Date.now() };
-    setMessages((prev) => [...prev, userMsg]);
+    const capturedImage = pendingImage;
+    const displayText = capturedImage
+      ? (trimmed ? `📷 ${trimmed}` : "📷 pasted image")
+      : trimmed;
+
+    setMessages((prev) => [...prev, { id: genId(), role: "user", text: displayText, timestamp: Date.now() }]);
     setInput("");
+    clearPendingImage();
     setLoading(true);
 
     try {
       const history = messages.slice(-10).map((m) => ({ role: m.role, text: m.text }));
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed, history }),
-      });
+      let data: { text?: string; cards?: Card[] };
 
-      const data = await res.json();
-      const assistantMsg: Message = {
-        id: genId(),
-        role: "assistant",
-        text: data.text || "",
-        cards: data.cards || [],
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
+      if (capturedImage) {
+        const form = new FormData();
+        form.append("photo", capturedImage);
+        if (trimmed) form.append("message", trimmed);
+        form.append("history", JSON.stringify(history));
+        const res = await fetch("/api/chat/photo", { method: "POST", body: form });
+        data = await res.json();
+      } else {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: trimmed, history }),
+        });
+        data = await res.json();
+      }
+
+      setMessages((prev) => [...prev, {
+        id: genId(), role: "assistant",
+        text: data.text || "", cards: data.cards || [], timestamp: Date.now(),
+      }]);
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        { id: genId(), role: "assistant", text: "Something went wrong. Try again.", timestamp: Date.now() },
-      ]);
+      setMessages((prev) => [...prev, {
+        id: genId(), role: "assistant",
+        text: "Something went wrong. Try again.", timestamp: Date.now(),
+      }]);
     } finally {
       setLoading(false);
     }
-  }, [messages, loading, stopPoll]);
+  }, [messages, loading, stopPoll, pendingImage, clearPendingImage]);
 
-  const handlePhotoCapture = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoCapture = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || loading) return;
-    stopPoll();
-    // Reset so the same file can be selected again
     e.target.value = "";
+    setPendingImageFile(file);
+    inputRef.current?.focus();
+  }, [loading, setPendingImageFile]);
 
-    const optimisticId = genId();
-    const userMsg: Message = { id: optimisticId, role: "user", text: `📷 ${file.name.replace(/\.[^.]+$/, "") || "photo"}`, timestamp: Date.now() };
-    setMessages((prev) => [...prev, userMsg]);
-    setLoading(true);
-
-    try {
-      const form = new FormData();
-      form.append("photo", file);
-      const res = await fetch("/api/chat/photo", { method: "POST", body: form });
-      const data = await res.json();
-      const assistantMsg: Message = {
-        id: genId(),
-        role: "assistant",
-        text: data.text || "",
-        cards: data.cards || [],
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { id: genId(), role: "assistant", text: "Couldn't identify the food. Try typing it instead.", timestamp: Date.now() },
-      ]);
-    } finally {
-      setLoading(false);
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items || loading) return;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) setPendingImageFile(file);
+        return;
+      }
     }
-  }, [loading, stopPoll]);
+  }, [loading, setPendingImageFile]);
 
   function handleKey(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -191,7 +227,7 @@ export function Chat() {
               Ask about your schedule, log a workout, or track nutrition.
             </div>
             <div className="mt-8 grid grid-cols-1 gap-2 w-full max-w-xs">
-              {["What's my workout today?", "Log 2 eggs", "Show my routines"].map((q) => (
+              {starters.map((q) => (
                 <button
                   key={q}
                   onClick={() => send(q)}
@@ -263,16 +299,39 @@ export function Chat() {
       {/* Input */}
       <div className="px-4 pb-8 pt-3 border-t border-[#111]">
         <div className="flex items-end gap-2 bg-[#111] border border-[#1A1A1A] rounded-2xl px-4 py-3 focus-within:border-[#333] transition-colors">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKey}
-            placeholder="Message"
-            rows={1}
-            className="flex-1 bg-transparent text-[15px] text-white placeholder-[#444] resize-none max-h-32 leading-relaxed"
-            style={{ scrollbarWidth: "none" }}
-          />
+          <div className="flex flex-col flex-1 min-w-0 gap-2">
+            {/* Pending image preview */}
+            {pendingImageUrl && (
+              <div className="relative inline-block self-start">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={pendingImageUrl}
+                  alt="pending upload"
+                  className="h-16 w-16 rounded-xl object-cover border border-[#333]"
+                />
+                <button
+                  onClick={clearPendingImage}
+                  className="absolute -top-1.5 -right-1.5 w-[18px] h-[18px] rounded-full bg-[#2a2a2a] border border-[#444] flex items-center justify-center"
+                  aria-label="Remove image"
+                >
+                  <svg width="7" height="7" viewBox="0 0 7 7" fill="none">
+                    <path d="M1 1l5 5M6 1L1 6" stroke="#aaa" strokeWidth="1.3" strokeLinecap="round"/>
+                  </svg>
+                </button>
+              </div>
+            )}
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKey}
+              onPaste={handlePaste}
+              placeholder={pendingImageUrl ? "Add a message (optional)..." : "Message"}
+              rows={1}
+              className="bg-transparent text-[15px] text-white placeholder-[#444] resize-none max-h-32 leading-relaxed w-full"
+              style={{ scrollbarWidth: "none" }}
+            />
+          </div>
           {/* hidden camera input */}
           <input
             ref={photoInputRef}
@@ -295,7 +354,7 @@ export function Chat() {
           </button>
           <button
             onClick={() => send(input)}
-            disabled={!input.trim() || loading}
+            disabled={(!input.trim() && !pendingImage) || loading}
             className="w-8 h-8 rounded-xl bg-[#BFFF00] flex items-center justify-center shrink-0 disabled:opacity-20 transition-opacity active:scale-95"
           >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">

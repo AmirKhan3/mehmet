@@ -1,0 +1,22 @@
+{
+  "description": "User shares cultural context — bot should retain it and reference it naturally",
+  "turns": [
+    {
+      "message": "I'm from Awadhi/Bhojpuri background. Eating roti, dal, sabzi mostly. Want to bulk.",
+      "expect": {
+        "not_contains": ["what is your diet", "what do you eat"],
+        "profile_after": {
+          "preferences.cultural_context": "Awadhi",
+          "preferences.diet": "roti"
+        }
+      }
+    },
+    {
+      "message": "What should I eat for more protein?",
+      "expect": {
+        "references_profile": ["roti", "dal", "sabzi"],
+        "not_contains": ["what do you currently eat", "tell me about your diet"]
+      }
+    }
+  ]
+}

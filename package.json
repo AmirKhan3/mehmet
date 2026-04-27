@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "eval": "node scripts/chat-eval.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

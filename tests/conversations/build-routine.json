@@ -1,0 +1,39 @@
+{
+  "description": "User shares body stats then asks to build a routine — bot should reference known facts, not re-ask them",
+  "turns": [
+    {
+      "message": "Ive been doing kettlebells for 2mo. I am 5'7\" 139lbs and want to build a strong pehlwan bodybuilder look.",
+      "expect": {
+        "not_contains": ["what's your weight", "how much do you weigh", "what are your goals"],
+        "profile_after": {
+          "weight_lbs": 139,
+          "preferences.training_style": "kettlebells"
+        }
+      }
+    },
+    {
+      "message": "build me a routine",
+      "expect": {
+        "not_contains": [
+          "can you tell me a bit more",
+          "how often you're willing",
+          "what is your current fitness",
+          "what are your goals",
+          "how much do you weigh"
+        ],
+        "references_profile": ["139", "kettlebell"]
+      }
+    },
+    {
+      "message": "What is 139lbs in kg",
+      "expect": {
+        "contains": ["63"],
+        "not_contains": [
+          "can you tell me more about your",
+          "what is your training routine",
+          "what are your goals"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "description": "User asks for a meal suggestion — bot should call suggestNextMeal tool",
+  "turns": [
+    {
+      "message": "what should I eat now?",
+      "expect": {
+        "tool": "suggestNextMeal"
+      }
+    },
+    {
+      "message": "what about something with more protein?",
+      "expect": {
+        "tool": "suggestNextMeal",
+        "not_contains": ["what are your macro goals", "what do you usually eat"]
+      }
+    }
+  ]
+}

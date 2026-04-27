@@ -1,0 +1,22 @@
+{
+  "description": "User expresses concern about belly fat during a bulk — bot should acknowledge and reference it in follow-ups",
+  "turns": [
+    {
+      "message": "I'm 175lbs, want to bulk but I'm concerned about gaining too much belly fat.",
+      "expect": {
+        "not_contains": ["what are your goals", "how much do you weigh"],
+        "profile_after": {
+          "weight_lbs": 175,
+          "preferences.concerns": "belly fat"
+        }
+      }
+    },
+    {
+      "message": "Will I gain weight too quickly on a bulk?",
+      "expect": {
+        "not_contains": ["what is your weight", "what are your goals"],
+        "references_profile": ["175", "belly"]
+      }
+    }
+  ]
+}
