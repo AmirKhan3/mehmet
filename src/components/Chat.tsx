@@ -23,6 +23,7 @@ export function Chat() {
   const [detailCard, setDetailCard] = useState<Card | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPoll = useCallback(() => {
@@ -109,6 +110,41 @@ export function Chat() {
       setLoading(false);
     }
   }, [messages, loading, stopPoll]);
+
+  const handlePhotoCapture = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || loading) return;
+    stopPoll();
+    // Reset so the same file can be selected again
+    e.target.value = "";
+
+    const optimisticId = genId();
+    const userMsg: Message = { id: optimisticId, role: "user", text: `📷 ${file.name.replace(/\.[^.]+$/, "") || "photo"}`, timestamp: Date.now() };
+    setMessages((prev) => [...prev, userMsg]);
+    setLoading(true);
+
+    try {
+      const form = new FormData();
+      form.append("photo", file);
+      const res = await fetch("/api/chat/photo", { method: "POST", body: form });
+      const data = await res.json();
+      const assistantMsg: Message = {
+        id: genId(),
+        role: "assistant",
+        text: data.text || "",
+        cards: data.cards || [],
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { id: genId(), role: "assistant", text: "Couldn't identify the food. Try typing it instead.", timestamp: Date.now() },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  }, [loading, stopPoll]);
 
   function handleKey(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -237,6 +273,26 @@ export function Chat() {
             className="flex-1 bg-transparent text-[15px] text-white placeholder-[#444] resize-none max-h-32 leading-relaxed"
             style={{ scrollbarWidth: "none" }}
           />
+          {/* hidden camera input */}
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={handlePhotoCapture}
+          />
+          {/* camera button */}
+          <button
+            onClick={() => photoInputRef.current?.click()}
+            disabled={loading}
+            className="w-8 h-8 rounded-xl bg-[#1A1A1A] border border-[#222] flex items-center justify-center shrink-0 disabled:opacity-20 transition-opacity active:scale-95"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M1 4.5C1 3.67 1.67 3 2.5 3h1l1-1.5h5L10.5 3h1c.83 0 1.5.67 1.5 1.5v7c0 .83-.67 1.5-1.5 1.5h-9C1.67 12 1 11.33 1 10.5v-6z" stroke="#666" strokeWidth="1.2" strokeLinejoin="round"/>
+              <circle cx="7" cy="7.5" r="2" stroke="#666" strokeWidth="1.2"/>
+            </svg>
+          </button>
           <button
             onClick={() => send(input)}
             disabled={!input.trim() || loading}

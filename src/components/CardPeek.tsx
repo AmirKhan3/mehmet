@@ -2,7 +2,7 @@
 import type { Card } from "@/types";
 import { SchedulePlanCard } from "./SchedulePlanCard";
 import { WorkoutLoggedCard, WorkoutLogsCard } from "./WorkoutCard";
-import { NutritionItemCard, NutritionDayCard, NutritionTargetsCard } from "./NutritionCard";
+import { NutritionItemCard, NutritionDayCard, NutritionTargetsCard, MealSuggestionCard, NutritionSetupCard, NutritionWeekCard } from "./NutritionCard";
 import { ConfirmationCard } from "./ConfirmationCard";
 import { RoutineImportPreviewCard, RoutineListCard } from "./RoutineCard";
 
@@ -51,6 +51,17 @@ function CardContent({ card, onConfirm }: { card: Card; onConfirm?: () => void }
       return <NutritionDayCard card={card} />;
     case "nutrition_targets_vs_actuals":
       return <NutritionTargetsCard card={card} />;
+    case "meal_suggestion": return <MealSuggestionCard card={card} />;
+    case "nutrition_setup_required": return <NutritionSetupCard card={card} />;
+    case "nutrition_week": return <NutritionWeekCard card={card} />;
+    case "nutrition_deleted":
+    case "nutrition_restored":
+      return (
+        <div className="space-y-1">
+          <div className="text-xs font-semibold tracking-widest text-[#BFFF00] uppercase">{card.type === "nutrition_deleted" ? "Removed" : "Restored"}</div>
+          <div className="text-[14px] text-white/80">{(card.data as { item_name?: string }).item_name}</div>
+        </div>
+      );
     case "program_edit_preview":
       return <PreviewCard card={card} />;
     case "confirmation":

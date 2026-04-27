@@ -30,6 +30,8 @@ export type CardType =
   | "nutrition_deleted"
   | "nutrition_restored"
   | "meal_suggestion"
+  | "nutrition_setup_required"
+  | "nutrition_week"
   | "routine_import_preview"
   | "routine_list"
   | "routine_detail"

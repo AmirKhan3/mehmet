@@ -141,6 +141,48 @@ RULES:
 20. Part A / Part B within one day: treat each as a separate block entry under that day's blocks array. "Part A — Block 1" and "Part A — Block 2" are two blocks; "Part B — ..." is a third block. Never skip Part B.
 21. Timed circuit exercises (format "Exercise Name — 40 sec. Coaching text."): name_raw is the exercise name only (before the dash), duration_sec is the number before "sec". Strip all coaching text after "sec." from name_raw. Example: "Hindu Squat (Baithak), fast pace — 40 sec. Target 20+ reps." → name_raw="Hindu Squat (Baithak)", duration_sec=40.`;
 
+export async function chatCompletionVision<T = string>(
+  imageBase64: string,
+  prompt: string,
+  mimeType: string = "image/jpeg"
+): Promise<T> {
+  const res = await fetch(`${process.env.NVIDIA_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: process.env.VISION_MODEL || "moonshotai/kimi-k2.5",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+      temperature: 0.1,
+      max_tokens: 256,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Vision LLM error ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  const raw = data.choices[0].message.content as string;
+  // Strip think blocks and fences (same as chatCompletionJSON)
+  const noThink = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  const noFences = noThink.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+  const match = noFences.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+  if (!match) throw new Error(`No JSON in vision response: ${raw.slice(0, 200)}`);
+  return JSON.parse(match[0]) as T;
+}
+
 export async function parseRoutine(text: string): Promise<import("@/types").ParsedRoutineResult> {
   const processed = preprocessRoutineText(text);
   console.log(`[parseRoutine] Original: ${text.length} chars → Preprocessed: ${processed.length} chars`);

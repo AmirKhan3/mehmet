@@ -3,7 +3,7 @@ import { motion, AnimatePresence, PanInfo } from "framer-motion";
 import type { Card } from "@/types";
 import { SchedulePlanDetail } from "./SchedulePlanCard";
 import { WorkoutLogsDetail, WorkoutLoggedDetail } from "./WorkoutCard";
-import { NutritionTargetsDetail, NutritionDayDetail, NutritionItemDetail } from "./NutritionCard";
+import { NutritionTargetsDetail, NutritionDayDetail, NutritionItemDetail, MealSuggestionDetail, NutritionSetupDetail, NutritionWeekDetail } from "./NutritionCard";
 import { RoutineImportPreviewDetail, RoutineListDetail, RoutineDetailView } from "./RoutineCard";
 
 interface Props {
@@ -78,6 +78,9 @@ function DetailContent({ card }: { card: Card }) {
       return <NutritionDayDetail card={card} />;
     case "nutrition_targets_vs_actuals":
       return <NutritionTargetsDetail card={card} />;
+    case "meal_suggestion": return <MealSuggestionDetail card={card} />;
+    case "nutrition_setup_required": return <NutritionSetupDetail card={card} />;
+    case "nutrition_week": return <NutritionWeekDetail card={card} />;
     case "routine_import_preview":
       return <RoutineImportPreviewDetail card={card} />;
     case "routine_list":
