@@ -3,7 +3,7 @@ import { chatCompletionJSON, chatCompletion } from "@/lib/llm";
 import { query } from "@/lib/db";
 import { getResolvedPlan, getTemplateForWeekday, getResolvedWeek, previewMoveSession } from "@/lib/tools/schedule";
 import { logWorkoutEntry, getWorkoutLogs, correctWorkoutEntry } from "@/lib/tools/workout";
-import { logNutritionItem, getNutritionDay, getNutritionTargetsVsActuals, correctNutritionEntry } from "@/lib/tools/nutrition";
+import { logNutritionItem, getNutritionDay, getNutritionTargetsVsActuals, correctNutritionEntry, deleteLastNutritionEntry, restoreLastNutritionEntry, suggestNextMeal } from "@/lib/tools/nutrition";
 import { importRoutine, listRoutines, activateRoutine } from "@/lib/tools/routines";
 import type { Card, ChatToolRequest } from "@/types";
 
@@ -20,7 +20,13 @@ Available tools:
 - getNutritionDay({"date":"today"}) → what I ate card
 - getNutritionTargetsVsActuals({"date":"today"}) → macro targets card
 - correctWorkoutEntry({"entry_id":null,"changes":{}}) → correction
-- correctNutritionEntry({"entry_id":null,"changes":{}}) → correction
+- correctNutritionEntry({"target":"last","changes":{"quantity":"3 eggs"}}) → fix the most recent log
+- deleteLastNutritionEntry({}) → "scratch that", "remove that", "undo last log"
+- restoreLastNutritionEntry({}) → "actually keep that", "bring it back"
+- suggestNextMeal({"intent":"fill_gap"}) → "what should I eat now", "need more protein", "close my macros"
+- suggestNextMeal({"intent":"post_workout"}) → "what to eat after workout", "post-workout meal"
+- suggestNextMeal({"intent":"next_meal"}) → "what should I eat later", "plan dinner", "what for lunch"
+- suggestNextMeal({"intent":"pair_with_last"}) → "what should I eat with this", "pair this"
 - listRoutines({}) → shows user's saved routines
 - activateRoutine({"routine_id":123}) → switches active routine
 
@@ -156,6 +162,9 @@ async function dispatchTool(req: ChatToolRequest): Promise<Card | null> {
     case "getNutritionDay": return getNutritionDay(args as { date?: string });
     case "getNutritionTargetsVsActuals": return getNutritionTargetsVsActuals(args as { date?: string });
     case "correctNutritionEntry": return correctNutritionEntry(args as Parameters<typeof correctNutritionEntry>[0]);
+    case "deleteLastNutritionEntry": return deleteLastNutritionEntry({} as never);
+    case "restoreLastNutritionEntry": return restoreLastNutritionEntry({} as never);
+    case "suggestNextMeal": return suggestNextMeal(args as { intent: "fill_gap" | "post_workout" | "next_meal" | "pair_with_last" });
     case "listRoutines": return listRoutines();
     case "activateRoutine": return activateRoutine(args as { routine_id: number });
     case "importRoutine": return importRoutine(args as { text: string });
@@ -176,7 +185,7 @@ async function logNutritionItemWithInlineMacros(args: Record<string, unknown>): 
 function toolDomain(tool: string): "schedule" | "workout" | "nutrition" | "routine" | "meta" {
   if (["getResolvedPlan","getTemplateForWeekday","getResolvedWeek","previewMoveSession","previewDailyOverride"].includes(tool)) return "schedule";
   if (["logWorkoutEntry","getWorkoutLogs","correctWorkoutEntry"].includes(tool)) return "workout";
-  if (["logNutritionItem","getNutritionDay","getNutritionTargetsVsActuals","correctNutritionEntry"].includes(tool)) return "nutrition";
+  if (["logNutritionItem","getNutritionDay","getNutritionTargetsVsActuals","correctNutritionEntry","deleteLastNutritionEntry","restoreLastNutritionEntry","suggestNextMeal"].includes(tool)) return "nutrition";
   if (["listRoutines","activateRoutine","importRoutine"].includes(tool)) return "routine";
   return "meta";
 }

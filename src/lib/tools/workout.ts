@@ -122,13 +122,19 @@ export async function correctWorkoutEntry(args: {
 }
 
 function resolveDate(date?: string): string {
-  if (!date || date === "today") return new Date().toISOString().split("T")[0];
-  if (date === "yesterday") {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    return d.toISOString().split("T")[0];
-  }
+  if (!date || date === "today") return todayPT();
+  if (date === "yesterday") return yesterdayPT();
   return date;
+}
+
+function todayPT(): string {
+  return new Date().toLocaleDateString("sv-SE", { timeZone: "America/Los_Angeles" });
+}
+
+function yesterdayPT(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toLocaleDateString("sv-SE", { timeZone: "America/Los_Angeles" });
 }
 
 function weekdayIndex(name: string): number {

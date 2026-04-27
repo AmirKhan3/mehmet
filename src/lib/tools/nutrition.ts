@@ -29,6 +29,21 @@ async function estimateMacros(item: string, quantity: string): Promise<MacroEsti
   }
 }
 
+async function resolveLastLoggedEntryId(): Promise<number | null> {
+  const rows = await query(
+    `SELECT cards_json FROM chat_messages WHERE role = 'assistant' ORDER BY id DESC LIMIT 5`
+  );
+  for (const row of rows) {
+    const cards = (row.cards_json as Array<{ type?: string; data?: Record<string, unknown> }>) || [];
+    for (const card of cards) {
+      if (card.type === "nutrition_item_logged" && card.data?.entry_id) {
+        return card.data.entry_id as number;
+      }
+    }
+  }
+  return null;
+}
+
 export async function logNutritionItem(args: {
   item: string;
   quantity?: string;
@@ -46,16 +61,17 @@ export async function logNutritionItem(args: {
       }
     : await estimateMacros(args.item, quantity);
 
-  await query(
+  const rows = await query(
     `INSERT INTO nutrition_entries (athlete_profile_id, date, item_name, quantity, calories, protein_g, carbs_g, fat_g, source)
-     VALUES (1, $1, $2, $3, $4, $5, $6, $7, 'llm_estimate')`,
+     VALUES (1, $1, $2, $3, $4, $5, $6, $7, 'llm_estimate') RETURNING id`,
     [date, args.item, quantity, macros.calories, macros.protein_g, macros.carbs_g, macros.fat_g]
   );
+  const entry_id = rows[0]?.id as number;
 
   return {
     type: "nutrition_item_logged",
     title: `Logged · ${args.item}`,
-    data: { date, item: args.item, quantity, ...macros },
+    data: { entry_id, date, item: args.item, quantity, ...macros },
   };
 }
 
@@ -63,7 +79,7 @@ export async function getNutritionDay(args: { date?: string }): Promise<Card> {
   const date = resolveDate(args.date);
 
   const entries = await query(
-    `SELECT * FROM nutrition_entries WHERE athlete_profile_id = 1 AND date = $1 ORDER BY id`,
+    `SELECT * FROM nutrition_entries WHERE athlete_profile_id = 1 AND date = $1 AND deleted_at IS NULL ORDER BY id`,
     [date]
   );
 
@@ -93,7 +109,7 @@ export async function getNutritionTargetsVsActuals(args: { date?: string }): Pro
   );
 
   const entries = await query(
-    `SELECT * FROM nutrition_entries WHERE athlete_profile_id = 1 AND date = $1`,
+    `SELECT * FROM nutrition_entries WHERE athlete_profile_id = 1 AND date = $1 AND deleted_at IS NULL`,
     [date]
   );
 
@@ -128,11 +144,19 @@ export async function getNutritionTargetsVsActuals(args: { date?: string }): Pro
 }
 
 export async function correctNutritionEntry(args: {
-  entry_id?: number;
+  target?: "last" | number;
   changes: Record<string, unknown>;
 }): Promise<Card> {
-  if (!args.entry_id) {
-    return { type: "nutrition_corrected", title: "Correction", data: { error: "No entry ID provided" } };
+  let entryId: number | null = null;
+
+  if (args.target === "last") {
+    entryId = await resolveLastLoggedEntryId();
+  } else if (typeof args.target === "number") {
+    entryId = args.target;
+  }
+
+  if (!entryId) {
+    return { type: "nutrition_corrected", title: "Correction", data: { error: "No recent log found to correct" } };
   }
 
   const fields = ["item_name", "quantity", "calories", "protein_g", "carbs_g", "fat_g"]
@@ -141,24 +165,138 @@ export async function correctNutritionEntry(args: {
   if (fields.length) {
     const sets = fields.map((k, i) => `${k} = $${i + 2}`).join(", ");
     const values = fields.map((k) => args.changes[k]);
-    await query(`UPDATE nutrition_entries SET ${sets} WHERE id = $1`, [args.entry_id, ...values]);
+    await query(`UPDATE nutrition_entries SET ${sets} WHERE id = $1`, [entryId, ...values]);
   }
 
   return {
     type: "nutrition_corrected",
     title: "Entry Updated",
-    data: { entry_id: args.entry_id, changes: args.changes },
+    data: { entry_id: entryId, changes: args.changes },
+  };
+}
+
+export async function deleteLastNutritionEntry(_args: Record<string, never>): Promise<Card> {
+  const entryId = await resolveLastLoggedEntryId();
+  if (!entryId) {
+    return { type: "nutrition_deleted", title: "Nothing to remove", data: { error: "No recent log found" } };
+  }
+  const rows = await query(
+    `UPDATE nutrition_entries SET deleted_at = NOW() WHERE id = $1 RETURNING item_name`,
+    [entryId]
+  );
+  const itemName = (rows[0]?.item_name as string) || "entry";
+  return { type: "nutrition_deleted", title: `Removed · ${itemName}`, data: { entry_id: entryId, item_name: itemName } };
+}
+
+export async function restoreLastNutritionEntry(_args: Record<string, never>): Promise<Card> {
+  const rows = await query(
+    `UPDATE nutrition_entries SET deleted_at = NULL
+     WHERE id = (
+       SELECT id FROM nutrition_entries WHERE athlete_profile_id = 1 AND deleted_at IS NOT NULL
+       ORDER BY deleted_at DESC LIMIT 1
+     ) RETURNING id, item_name`,
+    []
+  );
+  if (!rows.length) {
+    return { type: "nutrition_restored", title: "Nothing to restore", data: { error: "No removed entries found" } };
+  }
+  const itemName = (rows[0]?.item_name as string) || "entry";
+  return { type: "nutrition_restored", title: `Restored · ${itemName}`, data: { entry_id: rows[0]?.id, item_name: itemName } };
+}
+
+export async function suggestNextMeal(args: {
+  intent: "fill_gap" | "post_workout" | "next_meal" | "pair_with_last";
+}): Promise<Card> {
+  const date = todayPT();
+
+  const [target, entries] = await Promise.all([
+    queryOne(`SELECT * FROM nutrition_targets WHERE athlete_profile_id = 1 LIMIT 1`),
+    query(
+      `SELECT item_name, quantity, calories, protein_g, carbs_g, fat_g FROM nutrition_entries
+       WHERE athlete_profile_id = 1 AND date = $1 AND deleted_at IS NULL ORDER BY id`,
+      [date]
+    ),
+  ]);
+
+  type M = { calories: number; protein_g: number; carbs_g: number; fat_g: number };
+  const actuals = entries.reduce<M>(
+    (acc, r) => ({
+      calories: acc.calories + Number(r.calories || 0),
+      protein_g: acc.protein_g + Number(r.protein_g || 0),
+      carbs_g: acc.carbs_g + Number(r.carbs_g || 0),
+      fat_g: acc.fat_g + Number(r.fat_g || 0),
+    }),
+    { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }
+  );
+
+  const remaining = target
+    ? {
+        calories: (target.calories_max as number) - actuals.calories,
+        protein_g: (target.protein_max_g as number) - actuals.protein_g,
+        carbs_g: (target.carbs_max_g as number) - actuals.carbs_g,
+        fat_g: (target.fats_max_g as number) - actuals.fat_g,
+      }
+    : null;
+
+  const lastThree = entries.slice(-3).map((e) => `${e.quantity} ${e.item_name}`).join(", ");
+
+  type SuggestionResult = { meal: string; why: string; timing: string; macros: M };
+  const result = await chatCompletionJSON<SuggestionResult>(
+    [
+      {
+        role: "system",
+        content: `You are a nutrition assistant. Suggest ONE specific meal or food based on the user's current macro state and intent. Return ONLY JSON: {"meal":"...","why":"...","timing":"...","macros":{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}}`,
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          intent: args.intent,
+          remaining_macros: remaining,
+          today_so_far: actuals,
+          last_eaten: lastThree || "nothing yet",
+        }),
+      },
+    ],
+    { temperature: 0.4, max_tokens: 256 }
+  );
+
+  const remaining_after = remaining
+    ? {
+        calories: remaining.calories - result.macros.calories,
+        protein_g: remaining.protein_g - result.macros.protein_g,
+        carbs_g: remaining.carbs_g - result.macros.carbs_g,
+        fat_g: remaining.fat_g - result.macros.fat_g,
+      }
+    : null;
+
+  return {
+    type: "meal_suggestion",
+    title: `Suggestion · ${args.intent.replace(/_/g, " ")}`,
+    data: {
+      intent: args.intent,
+      suggestion: result.meal,
+      why: result.why,
+      timing: result.timing,
+      macros: result.macros,
+      remaining_after,
+    },
   };
 }
 
 function resolveDate(date?: string): string {
-  if (!date || date === "today") return new Date().toISOString().split("T")[0];
-  if (date === "yesterday") {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    return d.toISOString().split("T")[0];
-  }
+  if (!date || date === "today") return todayPT();
+  if (date === "yesterday") return yesterdayPT();
   return date;
+}
+
+function todayPT(): string {
+  return new Date().toLocaleDateString("sv-SE", { timeZone: "America/Los_Angeles" });
+}
+
+function yesterdayPT(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toLocaleDateString("sv-SE", { timeZone: "America/Los_Angeles" });
 }
 
 function formatDate(dateStr: string): string {
