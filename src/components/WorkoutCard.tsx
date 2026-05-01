@@ -2,6 +2,7 @@
 import type { Card } from "@/types";
 
 interface LogEntry {
+  id?: number;
   name: string;
   sets?: number;
   reps?: number;
@@ -83,7 +84,7 @@ export function WorkoutLogsCard({ card }: { card: Card }) {
   );
 }
 
-export function WorkoutLoggedDetail({ card }: { card: Card }) {
+export function WorkoutLoggedDetail({ card, onEditEntry }: { card: Card; onEditEntry?: (kind: "workout_log", entry_id: number) => void }) {
   const d = card.data as WorkoutLoggedData;
   const exercises = Array.isArray(d.exercises) ? d.exercises : [];
 
@@ -100,9 +101,19 @@ export function WorkoutLoggedDetail({ card }: { card: Card }) {
         {exercises.map((ex, i) => (
           <div key={i} className="flex items-center justify-between py-3 border-b border-[#1A1A1A]">
             <span className="text-[15px] font-medium text-white">{ex.name}</span>
-            <span className="text-[14px] font-mono text-[#BFFF00]">
-              {ex.sets && ex.reps ? `${ex.sets}×${ex.reps}` : ""}
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-[14px] font-mono text-[#BFFF00]">
+                {ex.sets && ex.reps ? `${ex.sets}×${ex.reps}` : ""}
+              </span>
+              {ex.id && onEditEntry && (
+                <button
+                  onClick={() => onEditEntry("workout_log", ex.id!)}
+                  className="text-[11px] text-[#555] hover:text-white/60 transition-colors"
+                >
+                  Edit
+                </button>
+              )}
+            </div>
           </div>
         ))}
         {exercises.length === 0 && (

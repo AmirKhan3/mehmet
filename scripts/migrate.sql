@@ -98,11 +98,19 @@ CREATE TABLE IF NOT EXISTS nutrition_targets (
 
 CREATE TABLE IF NOT EXISTS pending_actions (
   id SERIAL PRIMARY KEY,
+  athlete_profile_id INTEGER REFERENCES athlete_profile(id) DEFAULT 1,
   type TEXT NOT NULL,
   payload JSONB DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending',
   expires_at TIMESTAMPTZ,
+  resolved_at TIMESTAMPTZ,
+  result_card_json JSONB,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_pending_actions_open
+  ON pending_actions(athlete_profile_id, status, created_at DESC)
+  WHERE status = 'pending';
 
 CREATE TABLE IF NOT EXISTS chat_messages (
   id SERIAL PRIMARY KEY,

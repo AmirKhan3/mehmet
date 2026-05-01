@@ -1,5 +1,8 @@
 import { query, queryOne } from "../db";
+import { buildPreviewCard } from "../pending";
 import type { Card } from "@/types";
+
+const EXPIRES_MINUTES = 30;
 
 export async function logWorkoutEntry(args: {
   exercises?: { name: string; sets?: number; reps?: number; modifier?: string }[];
@@ -7,7 +10,6 @@ export async function logWorkoutEntry(args: {
   source_session?: string;
 }): Promise<Card> {
   const date = resolveDate(args.date);
-
   let exercises = args.exercises || [];
 
   if (!exercises.length && args.source_session) {
@@ -26,31 +28,52 @@ export async function logWorkoutEntry(args: {
     }
   }
 
-  const logged: { name: string; sets: number; reps: number }[] = [];
+  // Resolve exercise IDs upfront so the preview shows what will be written
+  const resolved = await Promise.all(
+    exercises.map(async (ex) => {
+      const row = await queryOne(
+        `SELECT id FROM exercise_catalog WHERE LOWER(name) = LOWER($1) LIMIT 1`,
+        [ex.name]
+      );
+      return { name: ex.name, sets: ex.sets ?? 1, reps: ex.reps ?? 0, modifier: ex.modifier ?? null, exercise_id: (row?.id as number) ?? null };
+    })
+  );
 
-  for (const ex of exercises) {
-    const catalogRow = await queryOne(
-      `SELECT id FROM exercise_catalog WHERE LOWER(name) = LOWER($1) LIMIT 1`,
-      [ex.name]
-    );
+  const expires = new Date(Date.now() + EXPIRES_MINUTES * 60 * 1000).toISOString();
+  const payload = { date, exercises: resolved, source_session: args.source_session ?? null };
 
-    const exerciseId = catalogRow?.id || null;
-    const dedup = `${date}:${exerciseId ?? ex.name}:${ex.sets ?? 1}:${ex.reps ?? 0}`;
+  const res = await query(
+    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES (1, 'log_workout', $1::jsonb, $2) RETURNING id`,
+    [JSON.stringify(payload), expires]
+  );
+  const pendingId = res[0].id as number;
+  return buildPreviewCard("log_workout", payload, pendingId);
+}
 
-    await query(
+export async function commitLogWorkout(payload: {
+  date: string;
+  exercises: { name: string; sets: number; reps: number; modifier?: string | null; exercise_id?: number | null }[];
+  source_session?: string | null;
+}): Promise<Card> {
+  const logged: { name: string; sets: number; reps: number; entry_id: number }[] = [];
+
+  for (const ex of payload.exercises) {
+    const exerciseId = ex.exercise_id ?? null;
+    const dedup = `${payload.date}:${exerciseId ?? ex.name}:${ex.sets}:${ex.reps}`;
+    const rows = await query(
       `INSERT INTO workout_logs (athlete_profile_id, date, exercise_id, sets, reps, status, modifier, dedup_key)
        VALUES (1, $1, $2, $3, $4, 'completed', $5, $6)
-       ON CONFLICT (dedup_key) DO NOTHING`,
-      [date, exerciseId, ex.sets || 1, ex.reps || 0, ex.modifier || null, dedup]
+       ON CONFLICT (dedup_key) DO UPDATE SET sets = EXCLUDED.sets, reps = EXCLUDED.reps
+       RETURNING id`,
+      [payload.date, exerciseId, ex.sets, ex.reps, ex.modifier ?? null, dedup]
     );
-
-    logged.push({ name: ex.name, sets: ex.sets || 1, reps: ex.reps || 0 });
+    logged.push({ name: ex.name, sets: ex.sets, reps: ex.reps, entry_id: rows[0].id as number });
   }
 
   return {
     type: "workout_logged",
-    title: `Workout Logged · ${formatDate(date)}`,
-    data: { date, exercises: logged, source_session: args.source_session || null },
+    title: `Workout Logged · ${formatDate(payload.date)}`,
+    data: { date: payload.date, exercises: logged, source_session: payload.source_session ?? null },
   };
 }
 
@@ -81,6 +104,7 @@ export async function getWorkoutLogs(args: { date?: string }): Promise<Card> {
     data: {
       date,
       logs: rows.map((r) => ({
+        id: r.id,
         name: r.exercise_name || "Unknown",
         sets: r.sets,
         reps: r.reps,
@@ -101,23 +125,46 @@ export async function correctWorkoutEntry(args: {
     return { type: "workout_corrected", title: "Correction", data: { error: "No entry ID provided" } };
   }
 
-  const sets = ["sets", "reps", "status", "skipped", "modifier"]
-    .filter((k) => args.changes[k] !== undefined)
-    .map((k, i) => `${k} = $${i + 2}`)
-    .join(", ");
+  const existing = await queryOne(
+    `SELECT sets, reps, status, skipped, modifier FROM workout_logs WHERE id = $1`,
+    [args.entry_id]
+  );
+  if (!existing) {
+    return { type: "workout_corrected", title: "Correction", data: { error: "Entry not found" } };
+  }
 
-  const values = ["sets", "reps", "status", "skipped", "modifier"]
-    .filter((k) => args.changes[k] !== undefined)
-    .map((k) => args.changes[k]);
+  const before = { sets: existing.sets, reps: existing.reps, status: existing.status, skipped: existing.skipped, modifier: existing.modifier };
+  const after = { ...before };
+  for (const k of ["sets", "reps", "status", "skipped", "modifier"] as const) {
+    if (args.changes[k] !== undefined) after[k] = args.changes[k] as never;
+  }
 
-  if (sets) {
-    await query(`UPDATE workout_logs SET ${sets} WHERE id = $1`, [args.entry_id, ...values]);
+  const expires = new Date(Date.now() + EXPIRES_MINUTES * 60 * 1000).toISOString();
+  const payload = { entry_id: args.entry_id, before, after };
+  const res = await query(
+    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES (1, 'correct_workout', $1::jsonb, $2) RETURNING id`,
+    [JSON.stringify(payload), expires]
+  );
+  const pendingId = res[0].id as number;
+  return buildPreviewCard("correct_workout", payload, pendingId);
+}
+
+export async function commitCorrectWorkout(payload: {
+  entry_id: number;
+  after: Record<string, unknown>;
+}): Promise<Card> {
+  const fields = ["sets", "reps", "status", "skipped", "modifier"].filter((k) => payload.after[k] !== undefined);
+
+  if (fields.length) {
+    const sets = fields.map((k, i) => `${k} = $${i + 2}`).join(", ");
+    const values = fields.map((k) => payload.after[k]);
+    await query(`UPDATE workout_logs SET ${sets} WHERE id = $1`, [payload.entry_id, ...values]);
   }
 
   return {
     type: "workout_corrected",
     title: "Entry Updated",
-    data: { entry_id: args.entry_id, changes: args.changes },
+    data: { entry_id: payload.entry_id, changes: payload.after },
   };
 }
 

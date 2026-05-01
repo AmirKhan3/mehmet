@@ -1,6 +1,6 @@
 import { chatCompletionJSON, chatCompletion } from "@/lib/llm";
 import { query } from "@/lib/db";
-import { getResolvedPlan, getTemplateForWeekday, getResolvedWeek, previewMoveSession } from "@/lib/tools/schedule";
+import { getResolvedPlan, getTemplateForWeekday, getResolvedWeek, prepareMoveSession } from "@/lib/tools/schedule";
 import { logWorkoutEntry, getWorkoutLogs, correctWorkoutEntry } from "@/lib/tools/workout";
 import { logNutritionItem, getNutritionDay, getNutritionTargetsVsActuals, correctNutritionEntry, deleteLastNutritionEntry, restoreLastNutritionEntry, suggestNextMeal, setupNutritionTargets, getNutritionWeekSummary } from "@/lib/tools/nutrition";
 import { importRoutine, listRoutines, activateRoutine } from "@/lib/tools/routines";
@@ -12,7 +12,7 @@ Available tools:
 - getResolvedPlan({"date":"today"}) → today's workout card
 - getTemplateForWeekday({"weekday":"Tuesday"}) → weekday plan card
 - getResolvedWeek({}) → full weekly routine card
-- previewMoveSession({"source":"Tuesday","targetDate":"today"}) → preview card
+- prepareMoveSession({"source":"Tuesday","targetDate":"today"}) → preview card
 - logWorkoutEntry({"exercises":[{"name":"...","sets":3,"reps":10}],"date":"today","source_session":"Tuesday"}) → log card
 - getWorkoutLogs({"date":"today"}) → what I finished card
 - logNutritionItem({"item":"eggs","quantity":"2","date":"today","macros":{"calories":140,"protein_g":12,"carbs_g":1,"fat_g":10}}) → nutrition card
@@ -143,7 +143,7 @@ async function dispatchTool(req: ChatToolRequest): Promise<Card | null> {
     case "getResolvedPlan": return getResolvedPlan(args as { date?: string });
     case "getTemplateForWeekday": return getTemplateForWeekday(args as { weekday: string });
     case "getResolvedWeek": return getResolvedWeek(args as { range?: string });
-    case "previewMoveSession": return previewMoveSession(args as { source: string; targetDate: string });
+    case "prepareMoveSession": return prepareMoveSession(args as { source: string; targetDate: string });
     case "logWorkoutEntry": return logWorkoutEntry(args as Parameters<typeof logWorkoutEntry>[0]);
     case "getWorkoutLogs": return getWorkoutLogs(args as { date?: string });
     case "correctWorkoutEntry": return correctWorkoutEntry(args as Parameters<typeof correctWorkoutEntry>[0]);
@@ -174,7 +174,7 @@ function logNutritionItemWithInlineMacros(args: Record<string, unknown>): Promis
 }
 
 function toolDomain(tool: string): "schedule" | "workout" | "nutrition" | "routine" | "meta" {
-  if (["getResolvedPlan","getTemplateForWeekday","getResolvedWeek","previewMoveSession"].includes(tool)) return "schedule";
+  if (["getResolvedPlan","getTemplateForWeekday","getResolvedWeek","prepareMoveSession"].includes(tool)) return "schedule";
   if (["logWorkoutEntry","getWorkoutLogs","correctWorkoutEntry"].includes(tool)) return "workout";
   if (["logNutritionItem","getNutritionDay","getNutritionTargetsVsActuals","correctNutritionEntry","deleteLastNutritionEntry","restoreLastNutritionEntry","suggestNextMeal","setupNutritionTargets","getNutritionWeekSummary"].includes(tool)) return "nutrition";
   if (["listRoutines","activateRoutine","importRoutine"].includes(tool)) return "routine";

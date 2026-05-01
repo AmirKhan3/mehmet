@@ -21,18 +21,23 @@ export type CardType =
   | "schedule_week"
   | "program_edit_preview"
   | "workout_logged"
+  | "workout_log_preview"
   | "workout_logs"
   | "workout_corrected"
+  | "workout_correction_preview"
   | "nutrition_item_logged"
   | "nutrition_day"
   | "nutrition_targets_vs_actuals"
+  | "nutrition_setup_preview"
   | "nutrition_corrected"
+  | "nutrition_correction_preview"
   | "nutrition_deleted"
   | "nutrition_restored"
   | "meal_suggestion"
   | "nutrition_setup_required"
   | "nutrition_week"
   | "routine_import_preview"
+  | "routine_activation_preview"
   | "routine_list"
   | "routine_detail"
   | "confirmation";
@@ -86,10 +91,18 @@ export interface ChatToolRequest {
   confidence: number;
 }
 
+export interface ActionDescriptor {
+  label: string;
+  kind: "confirm" | "cancel" | "edit";
+}
+
 export interface Card {
   type: CardType;
   title: string;
   data: Record<string, unknown>;
+  pending_id?: number;
+  actions?: ActionDescriptor[];
+  editable_fields?: string[];
 }
 
 export interface Message {

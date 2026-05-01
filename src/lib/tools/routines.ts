@@ -1,6 +1,9 @@
 import { query, queryOne } from "../db";
 import { parseRoutine } from "../llm";
+import { buildPreviewCard } from "../pending";
 import type { Card, ParsedBlock, ParsedDay, ParsedExercise, ParsedRoutine } from "@/types";
+
+const EXPIRES_MINUTES = 30;
 
 function slugify(name: string): string {
   return name
@@ -163,23 +166,24 @@ export async function importRoutine(args: { text: string }): Promise<Card> {
     0
   );
 
-  return {
-    type: "routine_import_preview",
-    title: parsed.routines[0].name,
-    data: {
-      routine_ids: routineIds,
-      routines: parsed.routines.map((r, i) => ({
-        id: routineIds[i],
-        name: r.name,
-        phase_label: r.phase_label ?? null,
-        schedule_mode: r.schedule_mode,
-        day_count: r.days.length,
-      })),
-      phases: parsed.routines.length,
-      total_exercises: totalExercises,
-      status: "draft",
-    },
+  const cardPayload = {
+    routine_ids: routineIds,
+    routines: parsed.routines.map((r, i) => ({
+      id: routineIds[i], name: r.name, phase_label: r.phase_label ?? null,
+      schedule_mode: r.schedule_mode, day_count: r.days.length,
+    })),
+    phases: parsed.routines.length,
+    total_exercises: totalExercises,
+    status: "draft",
   };
+
+  const expires = new Date(Date.now() + EXPIRES_MINUTES * 60 * 1000).toISOString();
+  const res = await query(
+    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES (1, 'import_routine', $1::jsonb, $2) RETURNING id`,
+    [JSON.stringify(cardPayload), expires]
+  );
+  const pendingId = res[0].id as number;
+  return buildPreviewCard("import_routine", cardPayload, pendingId);
 }
 
 export async function listRoutines(): Promise<Card> {
@@ -203,30 +207,34 @@ export async function listRoutines(): Promise<Card> {
 }
 
 export async function activateRoutine(args: { routine_id: number }): Promise<Card> {
-  // Archive current active routine
-  await query(
-    `UPDATE routines SET status = 'archived' WHERE athlete_profile_id = 1 AND status = 'active'`
-  );
+  const routine = await queryOne(`SELECT id, name FROM routines WHERE id = $1 AND athlete_profile_id = 1`, [args.routine_id]);
+  if (!routine) return { type: "routine_list", title: "Not Found", data: { error: "Routine not found" } };
 
-  // Activate target; set cycle_start_date if cycle mode (guard ensures ownership)
+  const expires = new Date(Date.now() + EXPIRES_MINUTES * 60 * 1000).toISOString();
+  const payload = { routine_id: args.routine_id, routine_name: routine.name as string };
+  const res = await query(
+    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES (1, 'activate_routine', $1::jsonb, $2) RETURNING id`,
+    [JSON.stringify(payload), expires]
+  );
+  const pendingId = res[0].id as number;
+  return buildPreviewCard("activate_routine", payload, pendingId);
+}
+
+export async function commitActivateRoutine(payload: { routine_id: number; routine_name: string }): Promise<Card> {
+  await query(`UPDATE routines SET status = 'archived' WHERE athlete_profile_id = 1 AND status = 'active'`);
   await query(
     `UPDATE routines
      SET status = 'active',
          cycle_start_date = CASE WHEN schedule_mode = 'cycle' THEN CURRENT_DATE ELSE cycle_start_date END,
          updated_at = NOW()
      WHERE id = $1 AND athlete_profile_id = 1`,
-    [args.routine_id]
+    [payload.routine_id]
   );
-
-  const routine = await queryOne(`SELECT * FROM routines WHERE id = $1`, [args.routine_id]);
-
+  const routine = await queryOne(`SELECT * FROM routines WHERE id = $1`, [payload.routine_id]);
   return {
     type: "routine_list",
     title: "Routine Activated",
-    data: {
-      activated: routine,
-      message: `${routine?.name as string} is now your active routine.`,
-    },
+    data: { activated: routine, message: `${payload.routine_name} is now your active routine.` },
   };
 }
 

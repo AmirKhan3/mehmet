@@ -161,6 +161,62 @@ export function Chat() {
     }
   }, [messages, loading, stopPoll, pendingImage, clearPendingImage]);
 
+  const handleAction = useCallback(async (
+    card: Card,
+    kind: "confirm" | "cancel" | "edit",
+    patch?: Record<string, unknown>
+  ) => {
+    const pendingId = card.pending_id;
+    if (!pendingId) return;
+
+    try {
+      const res = await fetch("/api/chat/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pending_id: pendingId, action: kind, patch }),
+      });
+      const data = await res.json() as { text?: string; card?: Card; error?: string };
+      if (data.error) return;
+
+      if (kind === "edit" && data.card) {
+        // Update the card in-place — find and replace the message containing this pending_id
+        setMessages((prev) => prev.map((msg) => {
+          if (!msg.cards) return msg;
+          const updated = msg.cards.map((c) => c.pending_id === pendingId ? data.card! : c);
+          return { ...msg, cards: updated };
+        }));
+      } else if (data.card) {
+        // confirm/cancel — append a new assistant message
+        setMessages((prev) => [...prev, {
+          id: genId(), role: "assistant",
+          text: data.text || "", cards: [data.card!], timestamp: Date.now(),
+        }]);
+      }
+    } catch {
+      // silent — don't disrupt the UI on transient errors
+    }
+  }, []);
+
+  const handleEditEntry = useCallback(async (kind: "workout_log" | "nutrition_entry", entry_id: number) => {
+    setDetailCard(null);
+    try {
+      const res = await fetch("/api/chat/action/edit-existing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, entry_id }),
+      });
+      const data = await res.json() as { card?: Card; error?: string };
+      if (data.card) {
+        setMessages((prev) => [...prev, {
+          id: genId(), role: "assistant",
+          text: "", cards: [data.card!], timestamp: Date.now(),
+        }]);
+      }
+    } catch {
+      // silent
+    }
+  }, []);
+
   const handlePhotoCapture = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || loading) return;
@@ -191,7 +247,7 @@ export function Chat() {
 
   return (
     <div className="flex flex-col h-full bg-black">
-      <CardDetail card={detailCard} onClose={() => setDetailCard(null)} />
+      <CardDetail card={detailCard} onClose={() => setDetailCard(null)} onEditEntry={handleEditEntry} />
 
       {/* Header */}
       <div className="flex items-center justify-between px-5 pt-14 pb-4 border-b border-[#111]">
@@ -267,7 +323,7 @@ export function Chat() {
                   <CardPeek
                     card={card}
                     onTap={setDetailCard}
-                    onConfirm={() => send("yes")}
+                    onAction={handleAction}
                   />
                 </div>
               ))}

@@ -1,6 +1,9 @@
 import { query, queryOne } from "../db";
 import { chatCompletionJSON } from "../llm";
+import { buildPreviewCard } from "../pending";
 import type { Card } from "@/types";
+
+const EXPIRES_MINUTES = 30;
 
 interface MacroEstimate {
   calories: number;
@@ -153,31 +156,47 @@ export async function correctNutritionEntry(args: {
   changes: Record<string, unknown>;
 }): Promise<Card> {
   let entryId: number | null = null;
-
   if (args.target === "last") {
     entryId = await resolveLastLoggedEntryId();
   } else if (typeof args.target === "number") {
     entryId = args.target;
   }
-
   if (!entryId) {
     return { type: "nutrition_corrected", title: "Correction", data: { error: "No recent log found to correct" } };
   }
 
-  const fields = ["item_name", "quantity", "calories", "protein_g", "carbs_g", "fat_g"]
-    .filter((k) => args.changes[k] !== undefined);
-
-  if (fields.length) {
-    const sets = fields.map((k, i) => `${k} = $${i + 2}`).join(", ");
-    const values = fields.map((k) => args.changes[k]);
-    await query(`UPDATE nutrition_entries SET ${sets} WHERE id = $1`, [entryId, ...values]);
+  const existing = await queryOne(
+    `SELECT item_name, quantity, calories, protein_g, carbs_g, fat_g FROM nutrition_entries WHERE id = $1`,
+    [entryId]
+  );
+  if (!existing) {
+    return { type: "nutrition_corrected", title: "Correction", data: { error: "Entry not found" } };
   }
 
-  return {
-    type: "nutrition_corrected",
-    title: "Entry Updated",
-    data: { entry_id: entryId, changes: args.changes },
-  };
+  const before = { item_name: existing.item_name, quantity: existing.quantity, calories: existing.calories, protein_g: existing.protein_g, carbs_g: existing.carbs_g, fat_g: existing.fat_g };
+  const after = { ...before, ...args.changes };
+
+  const expires = new Date(Date.now() + EXPIRES_MINUTES * 60 * 1000).toISOString();
+  const payload = { entry_id: entryId, before, after };
+  const res = await query(
+    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES (1, 'correct_nutrition', $1::jsonb, $2) RETURNING id`,
+    [JSON.stringify(payload), expires]
+  );
+  const pendingId = res[0].id as number;
+  return buildPreviewCard("correct_nutrition", payload, pendingId);
+}
+
+export async function commitCorrectNutrition(payload: {
+  entry_id: number;
+  after: Record<string, unknown>;
+}): Promise<Card> {
+  const fields = ["item_name", "quantity", "calories", "protein_g", "carbs_g", "fat_g"].filter((k) => payload.after[k] !== undefined);
+  if (fields.length) {
+    const sets = fields.map((k, i) => `${k} = $${i + 2}`).join(", ");
+    const values = fields.map((k) => payload.after[k]);
+    await query(`UPDATE nutrition_entries SET ${sets} WHERE id = $1`, [payload.entry_id, ...values]);
+  }
+  return { type: "nutrition_corrected", title: "Entry Updated", data: { entry_id: payload.entry_id, changes: payload.after } };
 }
 
 export async function deleteLastNutritionEntry(_args: Record<string, never>): Promise<Card> {
@@ -185,12 +204,22 @@ export async function deleteLastNutritionEntry(_args: Record<string, never>): Pr
   if (!entryId) {
     return { type: "nutrition_deleted", title: "Nothing to remove", data: { error: "No recent log found" } };
   }
-  const rows = await query(
-    `UPDATE nutrition_entries SET deleted_at = NOW() WHERE id = $1 RETURNING item_name`,
-    [entryId]
-  );
+  const rows = await query(`SELECT item_name FROM nutrition_entries WHERE id = $1`, [entryId]);
   const itemName = (rows[0]?.item_name as string) || "entry";
-  return { type: "nutrition_deleted", title: `Removed · ${itemName}`, data: { entry_id: entryId, item_name: itemName } };
+
+  const expires = new Date(Date.now() + EXPIRES_MINUTES * 60 * 1000).toISOString();
+  const payload = { entry_id: entryId, item_name: itemName };
+  const res = await query(
+    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES (1, 'delete_nutrition_entry', $1::jsonb, $2) RETURNING id`,
+    [JSON.stringify(payload), expires]
+  );
+  const pendingId = res[0].id as number;
+  return buildPreviewCard("delete_nutrition_entry", payload, pendingId);
+}
+
+export async function commitDeleteNutritionEntry(payload: { entry_id: number; item_name: string }): Promise<Card> {
+  await query(`UPDATE nutrition_entries SET deleted_at = NOW() WHERE id = $1`, [payload.entry_id]);
+  return { type: "nutrition_deleted", title: `Removed · ${payload.item_name}`, data: { entry_id: payload.entry_id, item_name: payload.item_name } };
 }
 
 export async function restoreLastNutritionEntry(_args: Record<string, never>): Promise<Card> {
@@ -339,40 +368,50 @@ export async function setupNutritionTargets(args: {
   height_in?: number;
   age?: number;
 }): Promise<Card> {
-  const weightKg = args.weight_lbs * 0.453592;
-  const heightCm = args.height_in ? args.height_in * 2.54 : 175; // default 175cm
-  const age = args.age ?? 28; // default age
-
-  // Mifflin-St Jeor (male default — single user app)
-  const bmr = 10 * weightKg + 6.25 * heightCm - 5 * age + 5;
-  const activityFactor = Math.min(1.9, 1.55 + 0.05 * args.training_days_per_week);
-  const tdee = Math.round(bmr * activityFactor);
-
-  const calTarget = args.goal === "cut" ? tdee - 500
-    : args.goal === "bulk" ? tdee + 300
-    : tdee;
-
-  const proteinG = Math.round(args.weight_lbs); // 1g per lb
-  const fatG = Math.round((calTarget * 0.25) / 9);
-  const carbG = Math.round((calTarget - proteinG * 4 - fatG * 9) / 4);
-
-  // No unique constraint on (athlete_profile_id, day_type) — use DELETE+INSERT
-  await query(
-    `DELETE FROM nutrition_targets WHERE athlete_profile_id = 1 AND day_type = 'default'`,
-    []
+  const computed = computeNutritionTargets(args);
+  const expires = new Date(Date.now() + EXPIRES_MINUTES * 60 * 1000).toISOString();
+  const payload = {
+    weight_lbs: args.weight_lbs, goal: args.goal,
+    training_days_per_week: args.training_days_per_week,
+    height_in: args.height_in ?? null, age: args.age ?? null,
+    computed,
+  };
+  const res = await query(
+    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES (1, 'setup_nutrition_targets', $1::jsonb, $2) RETURNING id`,
+    [JSON.stringify(payload), expires]
   );
+  const pendingId = res[0].id as number;
+  return buildPreviewCard("setup_nutrition_targets", payload, pendingId);
+}
+
+export async function commitSetupNutritionTargets(payload: {
+  weight_lbs: number;
+  goal: string;
+  computed: { calories_min: number; calories_max: number; protein_min_g: number; protein_max_g: number; carbs_min_g: number; carbs_max_g: number; fats_min_g: number; fats_max_g: number };
+}): Promise<Card> {
+  const c = payload.computed;
+  await query(`DELETE FROM nutrition_targets WHERE athlete_profile_id = 1 AND day_type = 'default'`, []);
   await query(
     `INSERT INTO nutrition_targets (athlete_profile_id, day_type, calories_min, calories_max, protein_min_g, protein_max_g, carbs_min_g, carbs_max_g, fats_min_g, fats_max_g)
      VALUES (1, 'default', $1, $2, $3, $4, $5, $6, $7, $8)`,
-    [calTarget - 100, calTarget, proteinG - 10, proteinG, carbG - 20, carbG, fatG - 5, fatG]
+    [c.calories_min, c.calories_max, c.protein_min_g, c.protein_max_g, c.carbs_min_g, c.carbs_max_g, c.fats_min_g, c.fats_max_g]
   );
-
-  await query(
-    `UPDATE athlete_profile SET weight = $1, goals = $2 WHERE id = 1`,
-    [args.weight_lbs, args.goal]
-  );
-
+  await query(`UPDATE athlete_profile SET weight = $1, goals = $2 WHERE id = 1`, [payload.weight_lbs, payload.goal]);
   return getNutritionTargetsVsActuals({ date: "today" });
+}
+
+function computeNutritionTargets(args: { weight_lbs: number; goal: string; training_days_per_week: number; height_in?: number | null; age?: number | null }) {
+  const weightKg = args.weight_lbs * 0.453592;
+  const heightCm = args.height_in ? args.height_in * 2.54 : 175;
+  const age = args.age ?? 28;
+  const bmr = 10 * weightKg + 6.25 * heightCm - 5 * age + 5;
+  const activityFactor = Math.min(1.9, 1.55 + 0.05 * args.training_days_per_week);
+  const tdee = Math.round(bmr * activityFactor);
+  const calTarget = args.goal === "cut" ? tdee - 500 : args.goal === "bulk" ? tdee + 300 : tdee;
+  const proteinG = Math.round(args.weight_lbs);
+  const fatG = Math.round((calTarget * 0.25) / 9);
+  const carbG = Math.round((calTarget - proteinG * 4 - fatG * 9) / 4);
+  return { calories_min: calTarget - 100, calories_max: calTarget, protein_min_g: proteinG - 10, protein_max_g: proteinG, carbs_min_g: carbG - 20, carbs_max_g: carbG, fats_min_g: fatG - 5, fats_max_g: fatG };
 }
 
 export async function getNutritionWeekSummary(_args: { weeks_back?: number }): Promise<Card> {

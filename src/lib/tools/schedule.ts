@@ -1,5 +1,8 @@
 import { query, queryOne } from "../db";
+import { buildPreviewCard } from "../pending";
 import type { Card } from "@/types";
+
+const EXPIRES_MINUTES = 30;
 
 const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -317,35 +320,77 @@ export async function getResolvedWeek(args: { range?: string }): Promise<Card> {
   };
 }
 
-export async function previewMoveSession(args: { source: string; targetDate: string }): Promise<Card> {
+export async function prepareMoveSession(args: { source: string; targetDate: string }): Promise<Card> {
   const routine = await getActiveRoutine();
   const date =
     args.targetDate === "today" ? new Date().toISOString().split("T")[0] : args.targetDate;
 
+  // Cycle-mode routines don't have weekday names — refuse gracefully
+  if (routine?.schedule_mode === "cycle") {
+    return {
+      type: "program_edit_preview",
+      title: "Move Session",
+      data: { error: "Your routine uses cycle mode. Sessions don't map to weekdays — adjust the cycle start date instead." },
+    };
+  }
+
   let sessionType = "Unknown";
+  let exercises: unknown[] = [];
   if (routine) {
     const dayIndex = WEEKDAY_NAMES.findIndex(
       (d) => d.toLowerCase() === args.source.toLowerCase()
     );
     if (dayIndex >= 0) {
       const d = await queryOne(
-        `SELECT session_type, name FROM routine_days WHERE routine_id = $1 AND day_index = $2`,
+        `SELECT id, session_type, name FROM routine_days WHERE routine_id = $1 AND day_index = $2`,
         [routine.id, dayIndex]
       );
-      sessionType = (d?.session_type as string) || (d?.name as string) || "Unknown";
+      if (d) {
+        sessionType = (d.session_type as string) || (d.name as string) || "Unknown";
+        const blocks = await getBlocksForDay(d.id as number);
+        exercises = flattenExercises(blocks);
+      }
     }
   }
 
+  const expires = new Date(Date.now() + EXPIRES_MINUTES * 60 * 1000).toISOString();
+  const payload = { source: args.source, target_date: date, session_type: sessionType, exercises };
+  const res = await query(
+    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES (1, 'move_session', $1::jsonb, $2) RETURNING id`,
+    [JSON.stringify(payload), expires]
+  );
+  const pendingId = res[0].id as number;
+  return buildPreviewCard("move_session", payload, pendingId);
+}
+
+export async function commitMoveSession(payload: {
+  source: string;
+  target_date: string;
+  session_type: string;
+  exercises?: unknown[];
+}): Promise<Card> {
+  await query(
+    `INSERT INTO schedule_overrides (athlete_profile_id, date, override_type, workout_type, exercises, metadata)
+     VALUES (1, $1, 'move', $2, $3::jsonb, $4::jsonb)
+     ON CONFLICT (athlete_profile_id, date) DO UPDATE
+       SET override_type = 'move', workout_type = EXCLUDED.workout_type,
+           exercises = EXCLUDED.exercises, metadata = EXCLUDED.metadata`,
+    [
+      payload.target_date,
+      payload.session_type,
+      JSON.stringify(payload.exercises ?? []),
+      JSON.stringify({ source: payload.source }),
+    ]
+  );
   return {
     type: "program_edit_preview",
-    title: `Move ${args.source} → ${formatDate(date)}`,
+    title: `Moved ${payload.source} → ${formatDate(payload.target_date)}`,
     data: {
       action: "move_session",
-      source: args.source,
-      target_date: date,
-      session_type: sessionType,
-      pending_confirmation: true,
-      message: `This will move your ${args.source} session to ${formatDate(date)}. Confirm to apply.`,
+      source: payload.source,
+      target_date: payload.target_date,
+      session_type: payload.session_type,
+      pending_confirmation: false,
     },
   };
 }

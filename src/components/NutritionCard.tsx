@@ -24,6 +24,7 @@ function MacroRow({ label, value, max, color }: MacroBar) {
 }
 
 interface NutritionItemData {
+  entry_id?: number;
   item?: string;
   quantity?: string;
   calories?: number;
@@ -108,14 +109,24 @@ export function NutritionTargetsCard({ card }: { card: Card }) {
   );
 }
 
-export function NutritionItemDetail({ card }: { card: Card }) {
+export function NutritionItemDetail({ card, onEditEntry }: { card: Card; onEditEntry?: (kind: "nutrition_entry", entry_id: number) => void }) {
   const d = card.data as NutritionItemData;
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <div className="text-xs font-semibold tracking-widest text-[#BFFF00] uppercase mb-1">Logged</div>
-        <div className="text-2xl font-bold text-white">{d.item}</div>
-        <div className="text-[14px] text-[#666] mt-1">{d.quantity}</div>
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="text-xs font-semibold tracking-widest text-[#BFFF00] uppercase mb-1">Logged</div>
+          <div className="text-2xl font-bold text-white">{d.item}</div>
+          <div className="text-[14px] text-[#666] mt-1">{d.quantity}</div>
+        </div>
+        {d.entry_id && onEditEntry && (
+          <button
+            onClick={() => onEditEntry("nutrition_entry", d.entry_id!)}
+            className="text-[12px] text-[#555] border border-[#2A2A2A] px-3 py-1.5 rounded-lg hover:bg-[#1A1A1A] hover:text-white/60 transition-colors"
+          >
+            Edit
+          </button>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-3">
         {[

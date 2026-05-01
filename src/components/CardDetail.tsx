@@ -9,9 +9,10 @@ import { RoutineImportPreviewDetail, RoutineListDetail, RoutineDetailView } from
 interface Props {
   card: Card | null;
   onClose: () => void;
+  onEditEntry?: (kind: "workout_log" | "nutrition_entry", entry_id: number) => void;
 }
 
-export function CardDetail({ card, onClose }: Props) {
+export function CardDetail({ card, onClose, onEditEntry }: Props) {
   function handleDragEnd(_: unknown, info: PanInfo) {
     if (info.offset.x > 80) onClose();
   }
@@ -51,7 +52,7 @@ export function CardDetail({ card, onClose }: Props) {
                 Back
               </button>
             </div>
-            <DetailContent card={card} />
+            <DetailContent card={card} onEditEntry={onEditEntry} />
           </motion.div>
         </>
       )}
@@ -59,7 +60,7 @@ export function CardDetail({ card, onClose }: Props) {
   );
 }
 
-function DetailContent({ card }: { card: Card }) {
+function DetailContent({ card, onEditEntry }: { card: Card; onEditEntry?: (kind: "workout_log" | "nutrition_entry", entry_id: number) => void }) {
   switch (card.type) {
     case "schedule_plan":
     case "weekday_template":
@@ -68,12 +69,12 @@ function DetailContent({ card }: { card: Card }) {
       return <WeekDetail card={card} />;
     case "workout_logged":
     case "workout_corrected":
-      return <WorkoutLoggedDetail card={card} />;
+      return <WorkoutLoggedDetail card={card} onEditEntry={onEditEntry as ((kind: "workout_log", id: number) => void) | undefined} />;
     case "workout_logs":
       return <WorkoutLogsDetail card={card} />;
     case "nutrition_item_logged":
     case "nutrition_corrected":
-      return <NutritionItemDetail card={card} />;
+      return <NutritionItemDetail card={card} onEditEntry={onEditEntry as ((kind: "nutrition_entry", id: number) => void) | undefined} />;
     case "nutrition_day":
       return <NutritionDayDetail card={card} />;
     case "nutrition_targets_vs_actuals":
