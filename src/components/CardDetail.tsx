@@ -88,14 +88,49 @@ function DetailContent({ card, onEditEntry }: { card: Card; onEditEntry?: (kind:
       return <RoutineListDetail card={card} />;
     case "routine_detail":
       return <RoutineDetailView card={card} />;
+    case "program_edit_preview": {
+      const d = card.data as { source?: string; target_date?: string; session_type?: string; error?: string; message?: string };
+      return (
+        <div className="p-6 space-y-6">
+          <div>
+            <div className="text-xs font-semibold tracking-widest text-yellow-400 uppercase mb-1">Move Session</div>
+            <div className="text-2xl font-bold text-white">{card.title}</div>
+          </div>
+          {d.error ? (
+            <div className="text-[14px] text-red-400">{d.error}</div>
+          ) : (
+            <div className="space-y-4">
+              {d.source && (
+                <div className="flex justify-between py-3 border-b border-[#1A1A1A]">
+                  <span className="text-[14px] text-[#666]">From</span>
+                  <span className="text-[14px] text-white">{d.source}</span>
+                </div>
+              )}
+              {d.target_date && (
+                <div className="flex justify-between py-3 border-b border-[#1A1A1A]">
+                  <span className="text-[14px] text-[#666]">To</span>
+                  <span className="text-[14px] text-white">{d.target_date}</span>
+                </div>
+              )}
+              {d.session_type && d.session_type !== "Unknown" && (
+                <div className="flex justify-between py-3 border-b border-[#1A1A1A]">
+                  <span className="text-[14px] text-[#666]">Session</span>
+                  <span className="text-[14px] text-white">{d.session_type}</span>
+                </div>
+              )}
+              {d.message && (
+                <div className="text-[13px] text-[#666]">{d.message}</div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
     default:
       return (
         <div className="p-6">
-          <div className="text-xs font-semibold tracking-widest text-[#BFFF00] uppercase mb-2">{card.type}</div>
-          <div className="text-2xl font-bold text-white mb-4">{card.title}</div>
-          <pre className="text-[11px] text-[#666] whitespace-pre-wrap break-all">
-            {JSON.stringify(card.data, null, 2)}
-          </pre>
+          <div className="text-xs font-semibold tracking-widest text-[#BFFF00] uppercase mb-2">{card.title}</div>
+          <div className="text-[14px] text-[#666]">Nothing to show here.</div>
         </div>
       );
   }
