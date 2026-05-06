@@ -12,8 +12,8 @@ export async function GET(req: NextRequest) {
           `SELECT wl.id,
                   TO_CHAR(wl.date, 'YYYY-MM-DD') AS date,
                   COALESCE(ec.name, wl.name_raw) AS exercise_name,
-                  wl.sets, wl.reps, wl.round_number, wl.status,
-                  wl.modifier, wl.exception_type, wl.skipped
+                  wl.sets, wl.reps, wl.duration_sec, wl.is_amrap,
+                  wl.round_number, wl.status, wl.modifier, wl.exception_type, wl.skipped
            FROM workout_logs wl
            LEFT JOIN exercise_catalog ec ON ec.id = wl.exercise_id
            WHERE wl.athlete_profile_id = $1 AND wl.date::date = $2::date

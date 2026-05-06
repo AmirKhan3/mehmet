@@ -233,9 +233,14 @@ export function buildPreviewCard(type: string, payload: Record<string, unknown>,
 function narrate(type: string, payload: Record<string, unknown>, _card: Card): string {
   switch (type) {
     case "log_workout": {
-      const exs = (payload.exercises as Array<{ name: string; sets: number; reps: number }>) || [];
-      if (exs.length === 1) return `Logged ${exs[0].sets}×${exs[0].reps} ${exs[0].name}.`;
-      return `Logged ${exs.length} exercises for ${fmtDate(payload.date as string)}.`;
+      const exs = (payload.exercises as Array<{ name: string; sets: number; reps: number; duration_sec?: number | null; is_amrap?: boolean | null; skipped?: boolean }>) || [];
+      const done = exs.filter((e) => !e.skipped);
+      if (done.length === 1) {
+        const e = done[0];
+        const vol = e.is_amrap ? `${e.sets}×AMRAP` : e.duration_sec ? `${e.sets}×${e.duration_sec}s` : `${e.sets}×${e.reps}`;
+        return `Logged ${vol} ${e.name}.`;
+      }
+      return `Logged ${done.length} exercises for ${fmtDate(payload.date as string)}.`;
     }
     case "correct_workout": return "Workout entry updated.";
     case "setup_nutrition_targets": {

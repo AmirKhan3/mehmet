@@ -15,7 +15,12 @@ Available tools:
 - getTemplateForWeekday({"weekday":"Tuesday"}) → weekday plan card. Compute the actual weekday yourself from "today" in "What's happening today" — never pass placeholder text like "tomorrow's weekday".
 - getResolvedWeek({}) → full weekly routine card
 - prepareMoveSession({"source":"Tuesday","targetDate":"today"}) → preview card
-- logWorkoutEntry({"exercises":[{"name":"...","sets":3,"reps":10,"skipped":false}],"date":"today","source_session":"Tuesday"}) → log card. Use skipped:true on an exercise when the user explicitly says they skipped it.
+- logWorkoutEntry({"exercises":[{"name":"...","sets":3,"reps":10,"duration_sec":null,"is_amrap":false,"modifier":null,"skipped":false,"replaces":null}],"date":"today","source_session":"Tuesday"}) → log card.
+  Exercise field rules:
+  - Use duration_sec (integer seconds) for time-based work (plank 30s, hollow hold 60s, dead hang). Set reps to null when duration_sec is set.
+  - Use is_amrap:true for "AMRAP" or "to failure" sets. Set reps to null.
+  - Use replaces:"routine exercise name" when the user swaps one exercise for another ("did side planks instead of plank" → {name:"side plank",duration_sec:30,replaces:"plank"}). The original will be auto-marked skipped.
+  - Use skipped:true when the user explicitly skipped an exercise without a substitute.
 - getWorkoutLogs({"date":"today"}) → what I finished card
 - logNutritionItem({"item":"eggs","quantity":"2","date":"today","macros":{"calories":140,"protein_g":12,"carbs_g":1,"fat_g":10}}) → nutrition card
 - getNutritionDay({"date":"today"}) → what I ate card

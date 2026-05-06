@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS workout_logs (
   exception_type TEXT,
   skipped BOOLEAN DEFAULT FALSE,
   partial BOOLEAN DEFAULT FALSE,
+  duration_sec INTEGER,
+  is_amrap BOOLEAN,
   dedup_key TEXT UNIQUE,
   source_message_id TEXT
 );

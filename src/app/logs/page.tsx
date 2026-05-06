@@ -7,6 +7,8 @@ interface LogRow {
   exercise_name: string | null;
   sets: number | null;
   reps: number | null;
+  duration_sec: number | null;
+  is_amrap: boolean | null;
   round_number: number | null;
   status: string | null;
   modifier: string | null;
@@ -32,11 +34,12 @@ function fmtShort(dateStr: string): string {
   return new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function setsRepsStr(row: LogRow): string {
+function volumeStr(row: LogRow): string {
+  if (row.is_amrap) return `${row.sets ?? ""}×AMRAP`;
+  if (row.duration_sec) return `${row.sets ?? ""}×${row.duration_sec}s`;
   if (row.sets && row.reps) return `${row.sets}×${row.reps}`;
   if (row.sets) return `${row.sets} sets`;
-  if (row.reps) return `${row.reps} reps`;
-  return "";
+  return row.reps ? `${row.reps} reps` : "";
 }
 
 export default function LogsPage() {
@@ -172,8 +175,8 @@ export default function LogsPage() {
                   )}
                 </div>
                 <div className="text-right shrink-0">
-                  {setsRepsStr(row) && (
-                    <div className="text-[13px] font-mono text-[#BFFF00]">{setsRepsStr(row)}</div>
+                  {volumeStr(row) && (
+                    <div className="text-[13px] font-mono text-[#BFFF00]">{volumeStr(row)}</div>
                   )}
                   {row.round_number != null && (
                     <div className="text-[10px] text-[#444] mt-0.5">round {row.round_number}</div>
