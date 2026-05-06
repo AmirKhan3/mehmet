@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { activateRoutine } from "@/lib/tools/routines";
+import { getCurrentAthleteId } from "@/lib/session";
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,7 +10,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "routine_id required" }, { status: 400 });
     }
 
-    const card = await activateRoutine({ routine_id: Number(routine_id) });
+    const athleteId = await getCurrentAthleteId();
+    const card = await activateRoutine(athleteId, { routine_id: Number(routine_id) });
     return NextResponse.json({ card });
   } catch (err) {
     console.error("Routine activate error:", err);

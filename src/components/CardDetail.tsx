@@ -82,6 +82,7 @@ function DetailContent({ card, onEditEntry }: { card: Card; onEditEntry?: (kind:
     case "meal_suggestion": return <MealSuggestionDetail card={card} />;
     case "nutrition_setup_required": return <NutritionSetupDetail card={card} />;
     case "nutrition_week": return <NutritionWeekDetail card={card} />;
+    case "nutrition_plan_import_preview": return <NutritionPlanImportDetail card={card} />;
     case "routine_import_preview":
       return <RoutineImportPreviewDetail card={card} />;
     case "routine_list":
@@ -134,6 +135,82 @@ function DetailContent({ card, onEditEntry }: { card: Card; onEditEntry?: (kind:
         </div>
       );
   }
+}
+
+function NutritionPlanImportDetail({ card }: { card: Card }) {
+  const d = card.data as {
+    targets?: Array<{ day_type: string; calories_min?: number | null; calories_max?: number | null; protein_min_g: number; protein_max_g: number; carbs_min_g: number; carbs_max_g: number; fats_min_g: number; fats_max_g: number }>;
+    rules?: Array<{ name: string; definition: string }>;
+    diet?: string | null;
+    goal?: string | null;
+    error?: string;
+  };
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <div className="text-xs font-semibold tracking-widest text-[#BFFF00] uppercase mb-1">Nutrition Plan Import</div>
+        <div className="text-2xl font-bold text-white">{card.title}</div>
+      </div>
+      {d.error ? (
+        <div className="text-[14px] text-red-400">{d.error}</div>
+      ) : (
+        <div className="space-y-6">
+          {(d.targets ?? []).map((t, i) => (
+            <div key={i} className="space-y-2">
+              <div className="text-xs font-semibold text-[#666] uppercase tracking-widest">
+                {t.day_type === "default" ? "Macro Targets" : `Macro Targets · ${t.day_type} day`}
+              </div>
+              {(t.calories_min || t.calories_max) && (
+                <div className="flex justify-between py-2 border-b border-[#1A1A1A]">
+                  <span className="text-[14px] text-[#666]">Calories</span>
+                  <span className="text-[14px] text-white">{t.calories_min}–{t.calories_max} kcal</span>
+                </div>
+              )}
+              <div className="flex justify-between py-2 border-b border-[#1A1A1A]">
+                <span className="text-[14px] text-[#666]">Protein</span>
+                <span className="text-[14px] text-white">{t.protein_min_g}–{t.protein_max_g}g</span>
+              </div>
+              <div className="flex justify-between py-2 border-b border-[#1A1A1A]">
+                <span className="text-[14px] text-[#666]">Carbs</span>
+                <span className="text-[14px] text-white">{t.carbs_min_g}–{t.carbs_max_g}g</span>
+              </div>
+              <div className="flex justify-between py-2 border-b border-[#1A1A1A]">
+                <span className="text-[14px] text-[#666]">Fats</span>
+                <span className="text-[14px] text-white">{t.fats_min_g}–{t.fats_max_g}g</span>
+              </div>
+            </div>
+          ))}
+          {(d.rules ?? []).length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs font-semibold text-[#666] uppercase tracking-widest">Eating Rules</div>
+              {(d.rules ?? []).map((r, i) => (
+                <div key={i} className="py-2 border-b border-[#1A1A1A]">
+                  <div className="text-[14px] font-semibold text-white">{r.name}</div>
+                  <div className="text-[13px] text-[#666]">{r.definition}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {(d.diet || d.goal) && (
+            <div className="space-y-2">
+              {d.diet && (
+                <div className="flex justify-between py-2 border-b border-[#1A1A1A]">
+                  <span className="text-[14px] text-[#666]">Diet</span>
+                  <span className="text-[14px] text-white">{d.diet}</span>
+                </div>
+              )}
+              {d.goal && (
+                <div className="flex justify-between py-2 border-b border-[#1A1A1A]">
+                  <span className="text-[14px] text-[#666]">Goal</span>
+                  <span className="text-[14px] text-white capitalize">{d.goal}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function WeekDetail({ card }: { card: Card }) {

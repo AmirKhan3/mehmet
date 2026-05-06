@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolvePendingAction } from "@/lib/pending";
+import { getCurrentAthleteId } from "@/lib/session";
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,7 +15,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "pending_id and action are required" }, { status: 400 });
     }
 
-    const result = await resolvePendingAction(pending_id, action, patch);
+    const athleteId = await getCurrentAthleteId();
+    const result = await resolvePendingAction(athleteId, pending_id, action, patch);
     return NextResponse.json(result);
   } catch (err) {
     const e = err as Error & { statusCode?: number };

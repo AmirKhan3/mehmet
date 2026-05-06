@@ -1,7 +1,7 @@
 import { query, queryOne } from "./db";
 import type { Card, ActionDescriptor } from "@/types";
 import { commitLogWorkout, commitCorrectWorkout } from "./tools/workout";
-import { commitSetupNutritionTargets, commitCorrectNutrition, commitDeleteNutritionEntry } from "./tools/nutrition";
+import { commitSetupNutritionTargets, commitCorrectNutrition, commitDeleteNutritionEntry, commitAddNutritionRule, commitEditNutritionRule, commitRemoveNutritionRule, commitRemoveDayTypeTarget, commitImportNutritionPlan } from "./tools/nutrition";
 import { commitActivateRoutine } from "./tools/routines";
 import { commitMoveSession } from "./tools/schedule";
 
@@ -13,35 +13,39 @@ type PendingRow = {
   expires_at: string | null;
 };
 
-// Editable top-level keys per action type (security allow-list for LLM patches)
 const EDITABLE_FIELDS: Record<string, string[]> = {
   log_workout: ["exercises", "date"],
   correct_workout: ["after"],
-  setup_nutrition_targets: ["weight_lbs", "goal", "training_days_per_week"],
+  setup_nutrition_targets: ["weight_lbs", "goal", "training_days_per_week", "day_type"],
   correct_nutrition: ["after"],
   move_session: ["target_date"],
+  add_nutrition_rule: ["name", "definition"],
+  edit_nutrition_rule: ["after"],
+  remove_nutrition_rule: [],
+  remove_day_type_target: [],
+  import_nutrition_plan: ["targets", "rules", "diet", "goal"],
 };
 
 const STANDARD_ACTIONS: ActionDescriptor[] = [
-  { label: "Confirm", kind: "confirm" },
+  { label: "Accept", kind: "confirm" },
   { label: "Cancel", kind: "cancel" },
-  { label: "Edit", kind: "edit" },
 ];
 const CONFIRM_CANCEL: ActionDescriptor[] = [
-  { label: "Confirm", kind: "confirm" },
+  { label: "Accept", kind: "confirm" },
   { label: "Cancel", kind: "cancel" },
 ];
 
 export type ResolvePendingResult = { text: string; card: Card };
 
 export async function resolvePendingAction(
+  athleteId: number,
   pendingId: number,
   action: "confirm" | "cancel" | "edit",
   patch?: Record<string, unknown>
 ): Promise<ResolvePendingResult> {
   const row = await queryOne(
-    `SELECT id, type, payload, status, expires_at FROM pending_actions WHERE id = $1 AND athlete_profile_id = 1`,
-    [pendingId]
+    `SELECT id, type, payload, status, expires_at FROM pending_actions WHERE id = $1 AND athlete_profile_id = $2`,
+    [pendingId, athleteId]
   ) as PendingRow | null;
 
   if (!row) throw Object.assign(new Error("Pending action not found"), { statusCode: 404 });
@@ -56,7 +60,7 @@ export async function resolvePendingAction(
     if (row.type === "import_routine") {
       const ids = (row.payload.routine_ids as number[]) || [];
       for (const id of ids) {
-        await query(`DELETE FROM routines WHERE id = $1 AND status = 'draft' AND athlete_profile_id = 1`, [id]);
+        await query(`DELETE FROM routines WHERE id = $1 AND status = 'draft' AND athlete_profile_id = $2`, [id, athleteId]);
       }
     }
     const card = buildPreviewCard(row.type, row.payload, pendingId);
@@ -88,7 +92,7 @@ export async function resolvePendingAction(
   const commitFn = COMMIT_FNS[row.type];
   if (!commitFn) throw new Error(`No commit handler for type: ${row.type}`);
 
-  const resultCard = await commitFn(row.payload);
+  const resultCard = await commitFn(athleteId, row.payload);
   await query(
     `UPDATE pending_actions SET status = 'confirmed', resolved_at = NOW(), result_card_json = $1::jsonb WHERE id = $2`,
     [JSON.stringify(resultCard), pendingId]
@@ -96,9 +100,10 @@ export async function resolvePendingAction(
   return { text: narrate(row.type, row.payload, resultCard), card: resultCard };
 }
 
-export async function resolveLatestPendingId(): Promise<number | null> {
+export async function resolveLatestPendingId(athleteId: number): Promise<number | null> {
   const row = await queryOne(
-    `SELECT id FROM pending_actions WHERE athlete_profile_id = 1 AND status = 'pending' AND expires_at > NOW() ORDER BY id DESC LIMIT 1`
+    `SELECT id FROM pending_actions WHERE athlete_profile_id = $1 AND status = 'pending' AND expires_at > NOW() ORDER BY id DESC LIMIT 1`,
+    [athleteId]
   );
   return (row?.id as number) ?? null;
 }
@@ -145,7 +150,7 @@ export function buildPreviewCard(type: string, payload: Record<string, unknown>,
         title: "Delete Entry",
         data: { action: "delete_nutrition_entry", message: `Delete "${payload.item_name}"?` },
         pending_id: pendingId,
-        actions: [{ label: "Yes, delete", kind: "confirm" }, { label: "Cancel", kind: "cancel" }],
+        actions: [{ label: "Delete", kind: "confirm" }, { label: "Cancel", kind: "cancel" }],
       };
     case "activate_routine":
       return {
@@ -175,6 +180,45 @@ export function buildPreviewCard(type: string, payload: Record<string, unknown>,
         },
         pending_id: pendingId,
         actions: [{ label: "Activate", kind: "confirm" }, { label: "Discard", kind: "cancel" }],
+      };
+    case "add_nutrition_rule":
+      return {
+        type: "nutrition_rule_add_preview",
+        title: `Add Rule · ${payload.name as string}`,
+        data: { name: payload.name, definition: payload.definition },
+        pending_id: pendingId, actions: STANDARD_ACTIONS, editable_fields: editableFields,
+      };
+    case "edit_nutrition_rule":
+      return {
+        type: "nutrition_rule_edit_preview",
+        title: `Edit Rule · ${payload.original_name as string}`,
+        data: { before: payload.before, after: payload.after },
+        pending_id: pendingId, actions: STANDARD_ACTIONS, editable_fields: editableFields,
+      };
+    case "remove_nutrition_rule":
+      return {
+        type: "confirmation",
+        title: "Remove Rule",
+        data: { action: "remove_nutrition_rule", message: `Remove "${payload.name as string}"?` },
+        pending_id: pendingId,
+        actions: [{ label: "Yes, remove", kind: "confirm" }, { label: "Cancel", kind: "cancel" }],
+      };
+    case "remove_day_type_target":
+      return {
+        type: "confirmation",
+        title: "Drop Day-Type Split",
+        data: { action: "remove_day_type_target", message: `Drop the ${payload.day_type as string}-day macro split? (Default targets stay.)` },
+        pending_id: pendingId,
+        actions: [{ label: "Yes, drop", kind: "confirm" }, { label: "Cancel", kind: "cancel" }],
+      };
+    case "import_nutrition_plan":
+      return {
+        type: "nutrition_plan_import_preview",
+        title: "Import Nutrition Plan",
+        data: { targets: payload.targets, rules: payload.rules, diet: payload.diet, goal: payload.goal },
+        pending_id: pendingId,
+        actions: [{ label: "Activate Plan", kind: "confirm" }, { label: "Discard", kind: "cancel" }, { label: "Edit", kind: "edit" }],
+        editable_fields: editableFields,
       };
     default:
       return {
@@ -206,6 +250,15 @@ function narrate(type: string, payload: Record<string, unknown>, _card: Card): s
       const name = (payload.routines as Array<{ name: string }>)?.[0]?.name ?? "routine";
       return `${name} activated.`;
     }
+    case "add_nutrition_rule": return `Saved "${payload.name as string}".`;
+    case "edit_nutrition_rule": return "Rule updated.";
+    case "remove_nutrition_rule": return `Removed "${payload.name as string}".`;
+    case "remove_day_type_target": return `Dropped ${payload.day_type as string}-day split.`;
+    case "import_nutrition_plan": {
+      const t = (payload.targets as Array<unknown>)?.length ?? 0;
+      const r = (payload.rules as Array<unknown>)?.length ?? 0;
+      return `Plan activated — ${t} target row${t === 1 ? "" : "s"}, ${r} rule${r === 1 ? "" : "s"}.`;
+    }
     default: return "Done.";
   }
 }
@@ -216,13 +269,17 @@ function fmtDate(dateStr: string): string {
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
-// Lazy map avoids circular-import issues — functions are resolved at call time, not module init
-const COMMIT_FNS: Record<string, (p: Record<string, unknown>) => Promise<Card>> = {
-  log_workout: (p) => commitLogWorkout(p as Parameters<typeof commitLogWorkout>[0]),
-  correct_workout: (p) => commitCorrectWorkout(p as Parameters<typeof commitCorrectWorkout>[0]),
-  setup_nutrition_targets: (p) => commitSetupNutritionTargets(p as Parameters<typeof commitSetupNutritionTargets>[0]),
-  correct_nutrition: (p) => commitCorrectNutrition(p as Parameters<typeof commitCorrectNutrition>[0]),
-  delete_nutrition_entry: (p) => commitDeleteNutritionEntry(p as Parameters<typeof commitDeleteNutritionEntry>[0]),
-  activate_routine: (p) => commitActivateRoutine(p as Parameters<typeof commitActivateRoutine>[0]),
-  move_session: (p) => commitMoveSession(p as Parameters<typeof commitMoveSession>[0]),
+const COMMIT_FNS: Record<string, (athleteId: number, p: Record<string, unknown>) => Promise<Card>> = {
+  log_workout: (id, p) => commitLogWorkout(id, p as Parameters<typeof commitLogWorkout>[1]),
+  correct_workout: (id, p) => commitCorrectWorkout(id, p as Parameters<typeof commitCorrectWorkout>[1]),
+  setup_nutrition_targets: (id, p) => commitSetupNutritionTargets(id, p as Parameters<typeof commitSetupNutritionTargets>[1]),
+  correct_nutrition: (id, p) => commitCorrectNutrition(id, p as Parameters<typeof commitCorrectNutrition>[1]),
+  delete_nutrition_entry: (id, p) => commitDeleteNutritionEntry(id, p as Parameters<typeof commitDeleteNutritionEntry>[1]),
+  activate_routine: (id, p) => commitActivateRoutine(id, p as Parameters<typeof commitActivateRoutine>[1]),
+  move_session: (id, p) => commitMoveSession(id, p as Parameters<typeof commitMoveSession>[1]),
+  add_nutrition_rule: (id, p) => commitAddNutritionRule(id, p as Parameters<typeof commitAddNutritionRule>[1]),
+  edit_nutrition_rule: (id, p) => commitEditNutritionRule(id, p as Parameters<typeof commitEditNutritionRule>[1]),
+  remove_nutrition_rule: (id, p) => commitRemoveNutritionRule(id, p as Parameters<typeof commitRemoveNutritionRule>[1]),
+  remove_day_type_target: (id, p) => commitRemoveDayTypeTarget(id, p as Parameters<typeof commitRemoveDayTypeTarget>[1]),
+  import_nutrition_plan: (id, p) => commitImportNutritionPlan(id, p as Parameters<typeof commitImportNutritionPlan>[1]),
 };

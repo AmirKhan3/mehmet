@@ -43,7 +43,7 @@ async function resetProfile() {
 }
 
 async function snapshotProfile() {
-  const rows = await dbQuery(`SELECT weight, height, goals, preferences FROM athlete_profile WHERE id = 1 LIMIT 1`);
+  const rows = await dbQuery(`SELECT weight AS weight_lbs, height AS height_in, goals, preferences FROM athlete_profile WHERE id = 1 LIMIT 1`);
   return rows[0] || {};
 }
 

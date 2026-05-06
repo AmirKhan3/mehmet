@@ -30,12 +30,13 @@ async function upsertExercise(nameRaw: string): Promise<number> {
   return row!.id as number;
 }
 
-async function insertRoutine(r: ParsedRoutine, sourceText: string): Promise<number> {
+async function insertRoutine(athleteId: number, r: ParsedRoutine, sourceText: string): Promise<number> {
   const today = new Date().toISOString().split("T")[0];
   const row = await queryOne(
     `INSERT INTO routines (athlete_profile_id, name, source_text, schedule_mode, status, phase_label, cycle_start_date)
-     VALUES (1, $1, $2, $3, 'draft', $4, $5) RETURNING id`,
+     VALUES ($1, $2, $3, $4, 'draft', $5, $6) RETURNING id`,
     [
+      athleteId,
       r.name,
       sourceText,
       r.schedule_mode,
@@ -54,14 +55,7 @@ async function insertDaysBlocksExercises(
     const dayRow = await queryOne(
       `INSERT INTO routine_days (routine_id, day_index, name, session_type, is_rest_day, notes)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [
-        routineId,
-        day.day_index,
-        day.name,
-        day.session_type,
-        day.is_rest_day,
-        day.notes ?? null,
-      ]
+      [routineId, day.day_index, day.name, day.session_type, day.is_rest_day, day.notes ?? null]
     );
     const dayId = dayRow!.id as number;
 
@@ -70,15 +64,7 @@ async function insertDaysBlocksExercises(
       const blockRow = await queryOne(
         `INSERT INTO routine_blocks (routine_day_id, sort_order, block_type, rounds, rest_between_exercises_sec, rest_between_rounds_sec, notes)
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-        [
-          dayId,
-          bi,
-          block.block_type,
-          block.rounds ?? null,
-          block.rest_between_exercises_sec ?? null,
-          block.rest_between_rounds_sec ?? null,
-          block.notes ?? null,
-        ]
+        [dayId, bi, block.block_type, block.rounds ?? null, block.rest_between_exercises_sec ?? null, block.rest_between_rounds_sec ?? null, block.notes ?? null]
       );
       const blockId = blockRow!.id as number;
 
@@ -89,28 +75,14 @@ async function insertDaysBlocksExercises(
         await query(
           `INSERT INTO routine_exercises (routine_block_id, sort_order, exercise_id, name_raw, sets, reps_min, reps_max, tempo, rir_min, rir_max, load_notes, duration_sec, is_amrap)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-          [
-            blockId,
-            ei,
-            exerciseId,
-            ex.name_raw,
-            ex.sets ?? null,
-            ex.reps_min ?? null,
-            ex.reps_max ?? null,
-            ex.tempo ?? null,
-            ex.rir_min ?? null,
-            ex.rir_max ?? null,
-            ex.load_notes ?? null,
-            ex.duration_sec ?? null,
-            ex.is_amrap ?? false,
-          ]
+          [blockId, ei, exerciseId, ex.name_raw, ex.sets ?? null, ex.reps_min ?? null, ex.reps_max ?? null, ex.tempo ?? null, ex.rir_min ?? null, ex.rir_max ?? null, ex.load_notes ?? null, ex.duration_sec ?? null, ex.is_amrap ?? false]
         );
       }
     }
   }
 }
 
-export async function importRoutine(args: { text: string }): Promise<Card> {
+export async function importRoutine(athleteId: number, args: { text: string }): Promise<Card> {
   const { text } = args;
 
   let parsed: Awaited<ReturnType<typeof parseRoutine>>;
@@ -133,14 +105,12 @@ export async function importRoutine(args: { text: string }): Promise<Card> {
     };
   }
 
-  // Insert all routines, collecting IDs
   const routineIds: number[] = [];
   for (const r of parsed.routines) {
-    const id = await insertRoutine(r, text);
+    const id = await insertRoutine(athleteId, r, text);
     routineIds.push(id);
   }
 
-  // Link phases 2+ to the first routine via parent_routine_id
   if (routineIds.length > 1) {
     for (let i = 1; i < routineIds.length; i++) {
       await query(
@@ -150,19 +120,12 @@ export async function importRoutine(args: { text: string }): Promise<Card> {
     }
   }
 
-  // Insert days/blocks/exercises for each routine
   for (let i = 0; i < parsed.routines.length; i++) {
     await insertDaysBlocksExercises(routineIds[i], parsed.routines[i].days);
   }
 
   const totalExercises = parsed.routines.reduce(
-    (sum, r) =>
-      sum +
-      r.days.reduce(
-        (dsum, d) =>
-          dsum + d.blocks.reduce((bsum, b) => bsum + b.exercises.length, 0),
-        0
-      ),
+    (sum, r) => sum + r.days.reduce((dsum, d) => dsum + d.blocks.reduce((bsum, b) => bsum + b.exercises.length, 0), 0),
     0
   );
 
@@ -179,24 +142,25 @@ export async function importRoutine(args: { text: string }): Promise<Card> {
 
   const expires = new Date(Date.now() + EXPIRES_MINUTES * 60 * 1000).toISOString();
   const res = await query(
-    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES (1, 'import_routine', $1::jsonb, $2) RETURNING id`,
-    [JSON.stringify(cardPayload), expires]
+    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES ($1, 'import_routine', $2::jsonb, $3) RETURNING id`,
+    [athleteId, JSON.stringify(cardPayload), expires]
   );
   const pendingId = res[0].id as number;
   return buildPreviewCard("import_routine", cardPayload, pendingId);
 }
 
-export async function listRoutines(): Promise<Card> {
+export async function listRoutines(athleteId: number): Promise<Card> {
   const rows = await query(
     `SELECT r.id, r.name, r.status, r.schedule_mode, r.phase_label, r.created_at,
             COUNT(DISTINCT rd.id)::int as day_count
      FROM routines r
      LEFT JOIN routine_days rd ON rd.routine_id = r.id
-     WHERE r.athlete_profile_id = 1
+     WHERE r.athlete_profile_id = $1
      GROUP BY r.id
      ORDER BY
        CASE r.status WHEN 'active' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,
-       r.created_at DESC`
+       r.created_at DESC`,
+    [athleteId]
   );
 
   return {
@@ -206,29 +170,32 @@ export async function listRoutines(): Promise<Card> {
   };
 }
 
-export async function activateRoutine(args: { routine_id: number }): Promise<Card> {
-  const routine = await queryOne(`SELECT id, name FROM routines WHERE id = $1 AND athlete_profile_id = 1`, [args.routine_id]);
+export async function activateRoutine(athleteId: number, args: { routine_id: number }): Promise<Card> {
+  const routine = await queryOne(
+    `SELECT id, name FROM routines WHERE id = $1 AND athlete_profile_id = $2`,
+    [args.routine_id, athleteId]
+  );
   if (!routine) return { type: "routine_list", title: "Not Found", data: { error: "Routine not found" } };
 
   const expires = new Date(Date.now() + EXPIRES_MINUTES * 60 * 1000).toISOString();
   const payload = { routine_id: args.routine_id, routine_name: routine.name as string };
   const res = await query(
-    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES (1, 'activate_routine', $1::jsonb, $2) RETURNING id`,
-    [JSON.stringify(payload), expires]
+    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES ($1, 'activate_routine', $2::jsonb, $3) RETURNING id`,
+    [athleteId, JSON.stringify(payload), expires]
   );
   const pendingId = res[0].id as number;
   return buildPreviewCard("activate_routine", payload, pendingId);
 }
 
-export async function commitActivateRoutine(payload: { routine_id: number; routine_name: string }): Promise<Card> {
-  await query(`UPDATE routines SET status = 'archived' WHERE athlete_profile_id = 1 AND status = 'active'`);
+export async function commitActivateRoutine(athleteId: number, payload: { routine_id: number; routine_name: string }): Promise<Card> {
+  await query(`UPDATE routines SET status = 'archived' WHERE athlete_profile_id = $1 AND status = 'active'`, [athleteId]);
   await query(
     `UPDATE routines
      SET status = 'active',
          cycle_start_date = CASE WHEN schedule_mode = 'cycle' THEN CURRENT_DATE ELSE cycle_start_date END,
          updated_at = NOW()
-     WHERE id = $1 AND athlete_profile_id = 1`,
-    [payload.routine_id]
+     WHERE id = $1 AND athlete_profile_id = $2`,
+    [payload.routine_id, athleteId]
   );
   const routine = await queryOne(`SELECT * FROM routines WHERE id = $1`, [payload.routine_id]);
   return {
@@ -238,8 +205,8 @@ export async function commitActivateRoutine(payload: { routine_id: number; routi
   };
 }
 
-export async function deleteRoutine(args: { routine_id: number }): Promise<Card> {
-  await query(`DELETE FROM routines WHERE id = $1 AND athlete_profile_id = 1`, [args.routine_id]);
+export async function deleteRoutine(athleteId: number, args: { routine_id: number }): Promise<Card> {
+  await query(`DELETE FROM routines WHERE id = $1 AND athlete_profile_id = $2`, [args.routine_id, athleteId]);
   return {
     type: "routine_list",
     title: "Routine Deleted",

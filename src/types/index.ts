@@ -36,6 +36,14 @@ export type CardType =
   | "meal_suggestion"
   | "nutrition_setup_required"
   | "nutrition_week"
+  | "nutrition_rule_added"
+  | "nutrition_rule_edited"
+  | "nutrition_rule_removed"
+  | "nutrition_rule_add_preview"
+  | "nutrition_rule_edit_preview"
+  | "nutrition_targets_removed"
+  | "nutrition_plan_import_preview"
+  | "nutrition_plan_imported"
   | "routine_import_preview"
   | "routine_activation_preview"
   | "routine_list"
@@ -111,6 +119,8 @@ export interface Message {
   text: string;
   cards?: Card[];
   timestamp: number;
+  /** Local object URL for a photo the user attached — only set on freshly sent messages, not on history loaded from DB */
+  photoUrl?: string;
 }
 
 export interface RouterResult {

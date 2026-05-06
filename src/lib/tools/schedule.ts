@@ -45,12 +45,13 @@ interface BlockRow {
   }[];
 }
 
-async function getActiveRoutine(): Promise<ActiveRoutine | null> {
+async function getActiveRoutine(athleteId: number): Promise<ActiveRoutine | null> {
   return queryOne(
     `SELECT id, name, schedule_mode, phase_label, cycle_start_date
      FROM routines
-     WHERE athlete_profile_id = 1 AND status = 'active'
-     LIMIT 1`
+     WHERE athlete_profile_id = $1 AND status = 'active'
+     LIMIT 1`,
+    [athleteId]
   ) as Promise<ActiveRoutine | null>;
 }
 
@@ -65,7 +66,6 @@ async function getDayIndex(routine: ActiveRoutine, date: string): Promise<number
     return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
   }
 
-  // Cycle mode: compute position from cycle_start_date using UTC to avoid DST drift
   const startStr = routine.cycle_start_date;
   if (!startStr) return 0;
 
@@ -126,13 +126,12 @@ function flattenExercises(blocks: BlockRow[]) {
   );
 }
 
-export async function getResolvedPlan(args: { date?: string }): Promise<Card> {
+export async function getResolvedPlan(athleteId: number, args: { date?: string }): Promise<Card> {
   const date =
     !args.date || args.date === "today"
       ? new Date().toISOString().split("T")[0]
       : args.date;
 
-  // Check for override first
   const override = await queryOne(
     `SELECT * FROM schedule_overrides WHERE date = $1 LIMIT 1`,
     [date]
@@ -152,7 +151,7 @@ export async function getResolvedPlan(args: { date?: string }): Promise<Card> {
     };
   }
 
-  const routine = await getActiveRoutine();
+  const routine = await getActiveRoutine(athleteId);
   if (!routine) {
     return {
       type: "schedule_plan",
@@ -204,8 +203,8 @@ export async function getResolvedPlan(args: { date?: string }): Promise<Card> {
   };
 }
 
-export async function getTemplateForWeekday(args: { weekday: string }): Promise<Card> {
-  const routine = await getActiveRoutine();
+export async function getTemplateForWeekday(athleteId: number, args: { weekday: string }): Promise<Card> {
+  const routine = await getActiveRoutine(athleteId);
   if (!routine) {
     return {
       type: "weekday_template",
@@ -223,7 +222,6 @@ export async function getTemplateForWeekday(args: { weekday: string }): Promise<
       return { type: "weekday_template", title: args.weekday, data: { error: "Unknown weekday" } };
     }
   } else {
-    // Cycle mode: treat weekday arg as a cycle day number or name
     const parsed = parseInt(args.weekday);
     dayIndex = isNaN(parsed) ? 0 : parsed;
   }
@@ -257,9 +255,9 @@ export async function getTemplateForWeekday(args: { weekday: string }): Promise<
   };
 }
 
-export async function getResolvedWeek(args: { range?: string }): Promise<Card> {
+export async function getResolvedWeek(athleteId: number, args: { range?: string }): Promise<Card> {
   void args;
-  const routine = await getActiveRoutine();
+  const routine = await getActiveRoutine(athleteId);
 
   if (!routine) {
     return {
@@ -303,7 +301,6 @@ export async function getResolvedWeek(args: { range?: string }): Promise<Card> {
       };
     });
   } else {
-    // Cycle mode: show days in order
     week = days.map((d, i) => ({
       weekday: (d.name as string) || `Day ${i + 1}`,
       weekday_index: d.day_index as number,
@@ -320,12 +317,11 @@ export async function getResolvedWeek(args: { range?: string }): Promise<Card> {
   };
 }
 
-export async function prepareMoveSession(args: { source: string; targetDate: string }): Promise<Card> {
-  const routine = await getActiveRoutine();
+export async function prepareMoveSession(athleteId: number, args: { source: string; targetDate: string }): Promise<Card> {
+  const routine = await getActiveRoutine(athleteId);
   const date =
     args.targetDate === "today" ? new Date().toISOString().split("T")[0] : args.targetDate;
 
-  // Cycle-mode routines don't have weekday names — refuse gracefully
   if (routine?.schedule_mode === "cycle") {
     return {
       type: "program_edit_preview",
@@ -356,14 +352,14 @@ export async function prepareMoveSession(args: { source: string; targetDate: str
   const expires = new Date(Date.now() + EXPIRES_MINUTES * 60 * 1000).toISOString();
   const payload = { source: args.source, target_date: date, session_type: sessionType, exercises };
   const res = await query(
-    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES (1, 'move_session', $1::jsonb, $2) RETURNING id`,
-    [JSON.stringify(payload), expires]
+    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES ($1, 'move_session', $2::jsonb, $3) RETURNING id`,
+    [athleteId, JSON.stringify(payload), expires]
   );
   const pendingId = res[0].id as number;
   return buildPreviewCard("move_session", payload, pendingId);
 }
 
-export async function commitMoveSession(payload: {
+export async function commitMoveSession(athleteId: number, payload: {
   source: string;
   target_date: string;
   session_type: string;
@@ -371,11 +367,12 @@ export async function commitMoveSession(payload: {
 }): Promise<Card> {
   await query(
     `INSERT INTO schedule_overrides (athlete_profile_id, date, override_type, workout_type, exercises, metadata)
-     VALUES (1, $1, 'move', $2, $3::jsonb, $4::jsonb)
+     VALUES ($1, $2, 'move', $3, $4::jsonb, $5::jsonb)
      ON CONFLICT (athlete_profile_id, date) DO UPDATE
        SET override_type = 'move', workout_type = EXCLUDED.workout_type,
            exercises = EXCLUDED.exercises, metadata = EXCLUDED.metadata`,
     [
+      athleteId,
       payload.target_date,
       payload.session_type,
       JSON.stringify(payload.exercises ?? []),

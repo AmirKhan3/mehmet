@@ -4,38 +4,132 @@ import type { Card } from "@/types";
 
 const EXPIRES_MINUTES = 30;
 
-export async function logWorkoutEntry(args: {
-  exercises?: { name: string; sets?: number; reps?: number; modifier?: string }[];
+type RoutineExercise = {
+  name: string;
+  sets: number;
+  reps: number;
+  reps_min: number | null;
+  reps_max: number | null;
+  is_amrap: boolean | null;
+  duration_sec: number | null;
+  load_notes: string | null;
+  modifier: string | null;
+  skipped: boolean;
+};
+
+export async function logWorkoutEntry(athleteId: number, args: {
+  exercises?: { name: string; sets?: number; reps?: number; modifier?: string; skipped?: boolean }[];
   date?: string;
   source_session?: string;
 }): Promise<Card> {
   const date = resolveDate(args.date);
-  let exercises = args.exercises || [];
+  let exercises: RoutineExercise[] = [];
+  const rawExercises = args.exercises || [];
 
-  if (!exercises.length && args.source_session) {
+  if (args.source_session) {
     const dayIndex = weekdayIndex(args.source_session);
     if (dayIndex >= 0) {
       const rows = await query(
-        `SELECT ec.name, ste.sets, ste.reps
-         FROM schedule_templates st
-         JOIN schedule_template_exercises ste ON ste.template_id = st.id
-         JOIN exercise_catalog ec ON ec.id = ste.exercise_id
-         WHERE st.weekday = $1
-         ORDER BY ste.sort_order`,
-        [dayIndex]
+        `SELECT COALESCE(ec.name, re.name_raw) AS name,
+                re.sets, re.reps_min, re.reps_max, re.is_amrap, re.duration_sec, re.load_notes
+         FROM routines r
+         JOIN routine_days rd ON rd.routine_id = r.id AND rd.day_index = $2
+         JOIN routine_blocks rb ON rb.routine_day_id = rd.id
+         JOIN routine_exercises re ON re.routine_block_id = rb.id
+         LEFT JOIN exercise_catalog ec ON ec.id = re.exercise_id
+         WHERE r.athlete_profile_id = $1 AND r.status = 'active'
+         ORDER BY rb.sort_order, re.sort_order`,
+        [athleteId, dayIndex]
       );
-      exercises = rows.map((r) => ({ name: r.name as string, sets: r.sets as number, reps: r.reps as number }));
+
+      const routineBase: RoutineExercise[] = rows.map((r) => ({
+        name: r.name as string,
+        sets: (r.sets as number) ?? 1,
+        reps: (r.reps_min as number) ?? 0,
+        reps_min: r.reps_min as number | null,
+        reps_max: r.reps_max as number | null,
+        is_amrap: r.is_amrap as boolean | null,
+        duration_sec: r.duration_sec as number | null,
+        load_notes: r.load_notes as string | null,
+        modifier: null,
+        skipped: false,
+      }));
+
+      const llmOverrides = rawExercises;
+
+      const merged: RoutineExercise[] = routineBase.map((base) => {
+        const firstWord = base.name.split(" ")[0].toLowerCase();
+        const override = llmOverrides.find(
+          (o) =>
+            base.name.toLowerCase().includes(o.name.toLowerCase()) ||
+            o.name.toLowerCase().includes(firstWord)
+        );
+        if (override) {
+          return {
+            ...base,
+            sets: override.sets ?? base.sets,
+            reps: override.reps ?? base.reps,
+            modifier: override.modifier ?? null,
+            skipped: override.skipped ?? false,
+          };
+        }
+        return base;
+      });
+
+      // Append LLM exercises not matched to any routine exercise (swaps/additions)
+      for (const o of llmOverrides) {
+        const firstWord = o.name.split(" ")[0].toLowerCase();
+        const alreadyRepresented = routineBase.some(
+          (b) =>
+            b.name.toLowerCase().includes(o.name.toLowerCase()) ||
+            o.name.toLowerCase().includes(b.name.split(" ")[0].toLowerCase()) ||
+            b.name.split(" ")[0].toLowerCase() === firstWord
+        );
+        if (!alreadyRepresented) {
+          merged.push({
+            name: o.name, sets: o.sets ?? 1, reps: o.reps ?? 0,
+            reps_min: null, reps_max: null, is_amrap: null, duration_sec: null, load_notes: null,
+            modifier: o.modifier ?? null, skipped: o.skipped ?? false,
+          });
+        }
+      }
+
+      exercises = merged;
+    } else {
+      // source_session provided but weekday unrecognized — fall back to LLM exercises
+      exercises = rawExercises.map((o) => ({
+        name: o.name, sets: o.sets ?? 1, reps: o.reps ?? 0,
+        reps_min: null, reps_max: null, is_amrap: null, duration_sec: null, load_notes: null,
+        modifier: o.modifier ?? null, skipped: o.skipped ?? false,
+      }));
     }
+  } else {
+    exercises = rawExercises.map((o) => ({
+      name: o.name, sets: o.sets ?? 1, reps: o.reps ?? 0,
+      reps_min: null, reps_max: null, is_amrap: null, duration_sec: null, load_notes: null,
+      modifier: o.modifier ?? null, skipped: o.skipped ?? false,
+    }));
   }
 
-  // Resolve exercise IDs upfront so the preview shows what will be written
   const resolved = await Promise.all(
     exercises.map(async (ex) => {
       const row = await queryOne(
         `SELECT id FROM exercise_catalog WHERE LOWER(name) = LOWER($1) LIMIT 1`,
         [ex.name]
       );
-      return { name: ex.name, sets: ex.sets ?? 1, reps: ex.reps ?? 0, modifier: ex.modifier ?? null, exercise_id: (row?.id as number) ?? null };
+      return {
+        name: ex.name,
+        sets: ex.sets,
+        reps: ex.reps,
+        reps_min: ex.reps_min,
+        reps_max: ex.reps_max,
+        is_amrap: ex.is_amrap,
+        duration_sec: ex.duration_sec,
+        load_notes: ex.load_notes,
+        modifier: ex.modifier,
+        skipped: ex.skipped,
+        exercise_id: (row?.id as number) ?? null,
+      };
     })
   );
 
@@ -43,31 +137,36 @@ export async function logWorkoutEntry(args: {
   const payload = { date, exercises: resolved, source_session: args.source_session ?? null };
 
   const res = await query(
-    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES (1, 'log_workout', $1::jsonb, $2) RETURNING id`,
-    [JSON.stringify(payload), expires]
+    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES ($1, 'log_workout', $2::jsonb, $3) RETURNING id`,
+    [athleteId, JSON.stringify(payload), expires]
   );
   const pendingId = res[0].id as number;
   return buildPreviewCard("log_workout", payload, pendingId);
 }
 
-export async function commitLogWorkout(payload: {
+export async function commitLogWorkout(athleteId: number, payload: {
   date: string;
-  exercises: { name: string; sets: number; reps: number; modifier?: string | null; exercise_id?: number | null }[];
+  exercises: {
+    name: string; sets: number; reps: number; modifier?: string | null; exercise_id?: number | null;
+    skipped?: boolean;
+  }[];
   source_session?: string | null;
 }): Promise<Card> {
-  const logged: { name: string; sets: number; reps: number; entry_id: number }[] = [];
+  const logged: { name: string; sets: number; reps: number; entry_id: number; skipped: boolean }[] = [];
 
   for (const ex of payload.exercises) {
     const exerciseId = ex.exercise_id ?? null;
+    const isSkipped = ex.skipped ?? false;
+    const status = isSkipped ? "skipped" : "completed";
     const dedup = `${payload.date}:${exerciseId ?? ex.name}:${ex.sets}:${ex.reps}`;
     const rows = await query(
-      `INSERT INTO workout_logs (athlete_profile_id, date, exercise_id, sets, reps, status, modifier, dedup_key)
-       VALUES (1, $1, $2, $3, $4, 'completed', $5, $6)
-       ON CONFLICT (dedup_key) DO UPDATE SET sets = EXCLUDED.sets, reps = EXCLUDED.reps
+      `INSERT INTO workout_logs (athlete_profile_id, date, exercise_id, name_raw, sets, reps, status, skipped, modifier, dedup_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (dedup_key) DO UPDATE SET sets = EXCLUDED.sets, reps = EXCLUDED.reps, name_raw = EXCLUDED.name_raw, status = EXCLUDED.status, skipped = EXCLUDED.skipped
        RETURNING id`,
-      [payload.date, exerciseId, ex.sets, ex.reps, ex.modifier ?? null, dedup]
+      [athleteId, payload.date, exerciseId, ex.name, ex.sets, ex.reps, status, isSkipped, ex.modifier ?? null, dedup]
     );
-    logged.push({ name: ex.name, sets: ex.sets, reps: ex.reps, entry_id: rows[0].id as number });
+    logged.push({ name: ex.name, sets: ex.sets, reps: ex.reps, entry_id: rows[0].id as number, skipped: isSkipped });
   }
 
   return {
@@ -77,16 +176,16 @@ export async function commitLogWorkout(payload: {
   };
 }
 
-export async function getWorkoutLogs(args: { date?: string }): Promise<Card> {
+export async function getWorkoutLogs(athleteId: number, args: { date?: string }): Promise<Card> {
   const date = resolveDate(args.date);
 
   const rows = await query(
     `SELECT wl.*, ec.name as exercise_name
      FROM workout_logs wl
      LEFT JOIN exercise_catalog ec ON ec.id = wl.exercise_id
-     WHERE wl.athlete_profile_id = 1 AND wl.date = $1
+     WHERE wl.athlete_profile_id = $1 AND wl.date = $2
      ORDER BY wl.id`,
-    [date]
+    [athleteId, date]
   );
 
   const scheduled = await query(
@@ -94,8 +193,8 @@ export async function getWorkoutLogs(args: { date?: string }): Promise<Card> {
      FROM schedule_templates st
      JOIN schedule_template_exercises ste ON ste.template_id = st.id
      JOIN exercise_catalog ec ON ec.id = ste.exercise_id
-     WHERE st.athlete_profile_id = 1 AND st.weekday = $1`,
-    [new Date(date + "T12:00:00").getDay()]
+     WHERE st.athlete_profile_id = $1 AND st.weekday = $2`,
+    [athleteId, new Date(date + "T12:00:00").getDay()]
   );
 
   return {
@@ -117,7 +216,7 @@ export async function getWorkoutLogs(args: { date?: string }): Promise<Card> {
   };
 }
 
-export async function correctWorkoutEntry(args: {
+export async function correctWorkoutEntry(athleteId: number, args: {
   entry_id?: number;
   changes: Record<string, unknown>;
 }): Promise<Card> {
@@ -142,14 +241,14 @@ export async function correctWorkoutEntry(args: {
   const expires = new Date(Date.now() + EXPIRES_MINUTES * 60 * 1000).toISOString();
   const payload = { entry_id: args.entry_id, before, after };
   const res = await query(
-    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES (1, 'correct_workout', $1::jsonb, $2) RETURNING id`,
-    [JSON.stringify(payload), expires]
+    `INSERT INTO pending_actions (athlete_profile_id, type, payload, expires_at) VALUES ($1, 'correct_workout', $2::jsonb, $3) RETURNING id`,
+    [athleteId, JSON.stringify(payload), expires]
   );
   const pendingId = res[0].id as number;
   return buildPreviewCard("correct_workout", payload, pendingId);
 }
 
-export async function commitCorrectWorkout(payload: {
+export async function commitCorrectWorkout(_athleteId: number, payload: {
   entry_id: number;
   after: Record<string, unknown>;
 }): Promise<Card> {

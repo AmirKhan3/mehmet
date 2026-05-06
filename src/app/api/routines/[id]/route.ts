@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query, queryOne } from "@/lib/db";
+import { getCurrentAthleteId } from "@/lib/session";
 
 function resolveTodayIndex(scheduleMode: string, cycleStartDate: string | null, totalDays: number): number {
   if (scheduleMode === "weekday") {
@@ -19,10 +20,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const id = parseInt(rawId);
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
+  const athleteId = await getCurrentAthleteId();
+
   const routine = await queryOne(
     `SELECT id, name, status, schedule_mode, phase_label, cycle_start_date
-     FROM routines WHERE id = $1 AND athlete_profile_id = 1`,
-    [id]
+     FROM routines WHERE id = $1 AND athlete_profile_id = $2`,
+    [id, athleteId]
   );
   if (!routine) return NextResponse.json({ error: "Not found" }, { status: 404 });
 

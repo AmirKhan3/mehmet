@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { loadProfile, loadTodayState } from "@/lib/profile";
+import { getCurrentAthleteId } from "@/lib/session";
 
 export async function GET() {
   try {
-    const [profile, today] = await Promise.all([loadProfile(), loadTodayState()]);
+    const athleteId = await getCurrentAthleteId();
+    const [profile, today] = await Promise.all([loadProfile(athleteId), loadTodayState(athleteId)]);
 
     const hasProfile =
       profile.weight_lbs != null ||

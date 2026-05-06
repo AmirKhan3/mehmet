@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { correctWorkoutEntry } from "@/lib/tools/workout";
 import { correctNutritionEntry } from "@/lib/tools/nutrition";
+import { getCurrentAthleteId } from "@/lib/session";
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,11 +15,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "kind and entry_id are required" }, { status: 400 });
     }
 
+    const athleteId = await getCurrentAthleteId();
+
     let card;
     if (kind === "workout_log") {
-      card = await correctWorkoutEntry({ entry_id, changes: {} });
+      card = await correctWorkoutEntry(athleteId, { entry_id, changes: {} });
     } else if (kind === "nutrition_entry") {
-      card = await correctNutritionEntry({ target: entry_id, changes: {} });
+      card = await correctNutritionEntry(athleteId, { target: entry_id, changes: {} });
     } else {
       return NextResponse.json({ error: `Unknown kind: ${kind}` }, { status: 400 });
     }

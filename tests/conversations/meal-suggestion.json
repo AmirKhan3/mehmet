@@ -4,13 +4,13 @@
     {
       "message": "what should I eat now?",
       "expect": {
-        "tool": "suggestNextMeal"
+        "tool": "meal_suggestion"
       }
     },
     {
       "message": "what about something with more protein?",
       "expect": {
-        "tool": "suggestNextMeal",
+        "tool": "meal_suggestion",
         "not_contains": ["what are your macro goals", "what do you usually eat"]
       }
     }

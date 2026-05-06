@@ -4,10 +4,19 @@ import type { Card } from "@/types";
 interface ConfirmData {
   message?: string;
   action?: string;
+  outcome?: string;
 }
 
 export function ConfirmationCard({ card, onConfirm }: { card: Card; onConfirm?: () => void }) {
   const d = card.data as ConfirmData;
+  if (d.outcome === "cancelled") {
+    return (
+      <div className="space-y-1">
+        <div className="text-xs font-semibold tracking-widest text-[#666] uppercase">Cancelled</div>
+        <div className="text-[13px] text-[#666]">Action discarded.</div>
+      </div>
+    );
+  }
   return (
     <div className="space-y-3">
       <div className="text-xs font-semibold tracking-widest text-red-400 uppercase">Confirm</div>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { chatCompletionVision } from "@/lib/llm";
 import { query } from "@/lib/db";
 import { runEngine, getMemory } from "@/lib/chatEngine";
+import { getCurrentAthleteId } from "@/lib/session";
 
 type VisionResult = {
   description: string;
@@ -31,12 +32,15 @@ Return ONLY JSON — no explanation, no markdown:
       mimeType
     );
   } catch (err) {
-    console.error("Vision error:", err);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[/api/chat/photo] Vision call failed:", msg);
     return NextResponse.json({
       text: "I couldn't make out what's in that image. Try again or describe it in text.",
       cards: [],
     });
   }
+
+  const athleteId = await getCurrentAthleteId();
 
   // Build the message the engine sees — photo context prepended so the router
   // can decide what tool to call (or whether to just talk).
@@ -50,8 +54,16 @@ Return ONLY JSON — no explanation, no markdown:
     [persistedUserText]
   );
 
-  const memory = await getMemory();
-  const { text, cards } = await runEngine(engineMessage, history, memory);
+  let text: string;
+  let cards: import("@/types").Card[];
+  try {
+    const memory = await getMemory(athleteId);
+    ({ text, cards } = await runEngine(athleteId, engineMessage, history, memory));
+  } catch (err) {
+    console.error("[/api/chat/photo] runEngine failed:", err);
+    text = "I saw the image but choked on the response. Try again?";
+    cards = [];
+  }
 
   await query(
     `INSERT INTO chat_messages (role, text, cards_json) VALUES ('assistant', $1, $2::jsonb)`,

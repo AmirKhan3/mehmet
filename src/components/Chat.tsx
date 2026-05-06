@@ -1,12 +1,44 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { signOut } from "next-auth/react";
 import { CardPeek } from "./CardPeek";
 import { CardDetail } from "./CardDetail";
 import type { Message, Card } from "@/types";
 
 function genId() {
   return Math.random().toString(36).slice(2);
+}
+
+// Resize image to fit within maxSide px on the longest edge. Returns original file unchanged
+// if it already fits. Falls back to original on any canvas error.
+async function resizeImageFile(file: File, maxSide = 1024): Promise<File> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const { naturalWidth: w, naturalHeight: h } = img;
+      if (w <= maxSide && h <= maxSide) {
+        resolve(file);
+        return;
+      }
+      const scale = maxSide / Math.max(w, h);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(w * scale);
+      canvas.height = Math.round(h * scale);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { resolve(file); return; }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(
+        (blob) => resolve(blob ? new File([blob], file.name, { type: "image/jpeg" }) : file),
+        "image/jpeg",
+        0.85
+      );
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
 }
 
 async function fetchMessages(): Promise<Message[]> {
@@ -26,6 +58,8 @@ export function Chat() {
   const [pendingImage, setPendingImage] = useState<File | null>(null);
   const [pendingImageUrl, setPendingImageUrl] = useState<string | null>(null);
   const [starters, setStarters] = useState<string[]>(DEFAULT_STARTERS);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -38,12 +72,9 @@ export function Chat() {
     }
   }, []);
 
-  // Revoke object URL when it changes to avoid memory leaks.
-  useEffect(() => {
-    return () => {
-      if (pendingImageUrl) URL.revokeObjectURL(pendingImageUrl);
-    };
-  }, [pendingImageUrl]);
+  // Object URLs owned by messages are intentionally not revoked — they live for
+  // the session lifetime. The pending preview URL is only revoked explicitly in
+  // clearPendingImage (cancel) and setPendingImageFile (replace).
 
   // Fetch contextual starters on mount — falls back to defaults on error.
   useEffect(() => {
@@ -96,6 +127,17 @@ export function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    if (!profileOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
+        setProfileOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [profileOpen]);
+
   const clearPendingImage = useCallback(() => {
     setPendingImage(null);
     setPendingImageUrl((prev) => {
@@ -118,13 +160,19 @@ export function Chat() {
     stopPoll();
 
     const capturedImage = pendingImage;
+    const capturedImageUrl = pendingImageUrl;
     const displayText = capturedImage
       ? (trimmed ? `📷 ${trimmed}` : "📷 pasted image")
       : trimmed;
 
-    setMessages((prev) => [...prev, { id: genId(), role: "user", text: displayText, timestamp: Date.now() }]);
+    setMessages((prev) => [...prev, {
+      id: genId(), role: "user", text: displayText, timestamp: Date.now(),
+      photoUrl: capturedImageUrl ?? undefined,
+    }]);
     setInput("");
-    clearPendingImage();
+    // URL is now owned by the message in state — don't revoke it here.
+    setPendingImage(null);
+    setPendingImageUrl(null);
     setLoading(true);
 
     try {
@@ -132,8 +180,10 @@ export function Chat() {
       let data: { text?: string; cards?: Card[] };
 
       if (capturedImage) {
+        // Keep payload under 1 MB to avoid Next.js body-size limits.
+        const resized = await resizeImageFile(capturedImage, 1024);
         const form = new FormData();
-        form.append("photo", capturedImage);
+        form.append("photo", resized);
         if (trimmed) form.append("message", trimmed);
         form.append("history", JSON.stringify(history));
         const res = await fetch("/api/chat/photo", { method: "POST", body: form });
@@ -159,7 +209,7 @@ export function Chat() {
     } finally {
       setLoading(false);
     }
-  }, [messages, loading, stopPoll, pendingImage, clearPendingImage]);
+  }, [messages, loading, stopPoll, pendingImage, pendingImageUrl]);
 
   const handleAction = useCallback(async (
     card: Card,
@@ -255,20 +305,64 @@ export function Chat() {
           <div className="text-[11px] font-semibold tracking-[0.2em] text-[#BFFF00] uppercase">Strong</div>
           <div className="text-[13px] text-[#444]">Training partner</div>
         </div>
-        <div className="flex items-center gap-2">
-          <a href="/logs" className="w-8 h-8 rounded-full bg-[#111] border border-[#222] flex items-center justify-center" title="Logs">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M2 4h10M2 7h7M2 10h5" stroke="#666" strokeWidth="1.2" strokeLinecap="round"/>
+        <div className="relative" ref={profileMenuRef}>
+          <button
+            onClick={() => setProfileOpen((o) => !o)}
+            className="w-8 h-8 rounded-full bg-[#111] border border-[#222] flex items-center justify-center hover:border-[#444] transition-colors"
+            title="Profile"
+          >
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+              <circle cx="7.5" cy="5" r="2.5" stroke="#666" strokeWidth="1.2"/>
+              <path d="M2 13c0-3 2.5-5 5.5-5s5.5 2 5.5 5" stroke="#666" strokeWidth="1.2" strokeLinecap="round"/>
             </svg>
-          </a>
-          <a href="/routines" className="w-8 h-8 rounded-full bg-[#111] border border-[#222] flex items-center justify-center" title="Routines">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <rect x="2" y="2" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
-              <rect x="8" y="2" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
-              <rect x="2" y="8" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
-              <rect x="8" y="8" width="4" height="4" rx="0.8" stroke="#666" strokeWidth="1.2"/>
-            </svg>
-          </a>
+          </button>
+
+          <AnimatePresence>
+            {profileOpen && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                transition={{ duration: 0.12 }}
+                className="absolute right-0 top-10 w-44 bg-[#111] border border-[#222] rounded-2xl overflow-hidden shadow-xl z-50"
+              >
+                <a
+                  href="/logs"
+                  className="flex items-center gap-3 px-4 py-3 text-[13px] text-[#999] hover:text-white hover:bg-[#1A1A1A] transition-colors"
+                  onClick={() => setProfileOpen(false)}
+                >
+                  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                    <path d="M2 4h10M2 7h7M2 10h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                  </svg>
+                  Logs
+                </a>
+                <a
+                  href="/routines"
+                  className="flex items-center gap-3 px-4 py-3 text-[13px] text-[#999] hover:text-white hover:bg-[#1A1A1A] transition-colors"
+                  onClick={() => setProfileOpen(false)}
+                >
+                  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                    <rect x="2" y="2" width="4" height="4" rx="0.8" stroke="currentColor" strokeWidth="1.2"/>
+                    <rect x="8" y="2" width="4" height="4" rx="0.8" stroke="currentColor" strokeWidth="1.2"/>
+                    <rect x="2" y="8" width="4" height="4" rx="0.8" stroke="currentColor" strokeWidth="1.2"/>
+                    <rect x="8" y="8" width="4" height="4" rx="0.8" stroke="currentColor" strokeWidth="1.2"/>
+                  </svg>
+                  Routines
+                </a>
+                <div className="border-t border-[#1A1A1A]" />
+                <button
+                  onClick={() => signOut({ callbackUrl: "/login" })}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-[13px] text-[#666] hover:text-[#ff6b6b] hover:bg-[#1A1A1A] transition-colors"
+                >
+                  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                    <path d="M5 7h7M9.5 4.5 12 7l-2.5 2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M8 2H3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                  </svg>
+                  Sign out
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
@@ -305,6 +399,14 @@ export function Chat() {
               transition={{ duration: 0.2 }}
               className={`flex flex-col gap-2 ${msg.role === "user" ? "items-end" : "items-start"}`}
             >
+              {msg.photoUrl && (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={msg.photoUrl}
+                  alt="uploaded photo"
+                  className="h-36 max-w-[60%] rounded-2xl object-cover border border-[#333]"
+                />
+              )}
               {msg.text && (
                 <div
                   className={`

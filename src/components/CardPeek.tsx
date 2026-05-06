@@ -11,6 +11,7 @@ const PREVIEW_TYPES = new Set([
   "workout_correction_preview",
   "nutrition_setup_preview",
   "nutrition_correction_preview",
+  "nutrition_plan_import_preview",
   "routine_activation_preview",
   "program_edit_preview",
   "confirmation",
@@ -145,6 +146,8 @@ function CardContent({
     case "nutrition_week": return <NutritionWeekCard card={card} />;
     case "nutrition_setup_preview":
       return <NutritionSetupPreviewCard card={card} />;
+    case "nutrition_plan_import_preview":
+      return <NutritionPlanImportPreviewCard card={card} />;
     case "nutrition_correction_preview":
       return <NutritionCorrectionPreviewCard card={card} />;
     case "nutrition_deleted":
@@ -210,17 +213,50 @@ function ProgramEditPreviewCard({ card }: { card: Card }) {
   );
 }
 
+type PreviewExercise = {
+  name: string;
+  sets: number;
+  reps: number;
+  reps_min?: number | null;
+  reps_max?: number | null;
+  is_amrap?: boolean | null;
+  duration_sec?: number | null;
+  load_notes?: string | null;
+  modifier?: string | null;
+  skipped?: boolean;
+};
+
+function fmtVolume(ex: PreviewExercise): string {
+  if (ex.duration_sec) return `${ex.sets}×${ex.duration_sec}s`;
+  if (ex.is_amrap) return `${ex.sets}×AMRAP`;
+  if (ex.reps_min != null && ex.reps_max != null && ex.reps_min !== ex.reps_max) {
+    return `${ex.sets}×${ex.reps_min}–${ex.reps_max}`;
+  }
+  const r = ex.reps_min ?? ex.reps;
+  return r ? `${ex.sets}×${r}` : `${ex.sets} sets`;
+}
+
 function WorkoutLogPreviewCard({ card }: { card: Card }) {
-  const d = card.data as { date?: string; exercises?: { name: string; sets: number; reps: number }[] };
+  const d = card.data as { date?: string; exercises?: PreviewExercise[] };
   return (
     <div className="space-y-2">
       <div className="text-xs font-semibold tracking-widest text-[#BFFF00] uppercase">Log Preview</div>
       <div className="text-[12px] text-[#666]">{d.date}</div>
       <div className="space-y-1">
         {(d.exercises || []).map((ex, i) => (
-          <div key={i} className="flex justify-between text-[13px]">
-            <span className="text-white/80">{ex.name}</span>
-            <span className="text-[#666]">{ex.sets}×{ex.reps}</span>
+          <div key={i} className={`flex items-start justify-between text-[13px] ${ex.skipped ? "opacity-40" : ""}`}>
+            <div className="flex-1 min-w-0 pr-2">
+              <span className={ex.skipped ? "line-through text-white/60" : "text-white/80"}>{ex.name}</span>
+              {ex.load_notes && !ex.skipped && (
+                <div className="text-[11px] text-[#555] mt-0.5">{ex.load_notes}</div>
+              )}
+            </div>
+            <div className="text-right shrink-0">
+              {ex.skipped
+                ? <span className="text-[11px] text-[#555]">skipped</span>
+                : <span className="text-[#BFFF00] font-mono">{fmtVolume(ex)}</span>
+              }
+            </div>
           </div>
         ))}
       </div>
@@ -279,14 +315,18 @@ function NutritionSetupPreviewCard({ card }: { card: Card }) {
       )}
       {d.computed && (
         <>
-          <div className="flex justify-between text-[13px]">
-            <span className="text-[#666]">Calories</span>
-            <span className="text-white/80">{d.computed.calories_max} kcal</span>
-          </div>
-          <div className="flex justify-between text-[13px]">
-            <span className="text-[#666]">Protein</span>
-            <span className="text-white/80">{d.computed.protein_max_g}g</span>
-          </div>
+          {Number.isFinite(d.computed.calories_max) && (
+            <div className="flex justify-between text-[13px]">
+              <span className="text-[#666]">Calories</span>
+              <span className="text-white/80">{d.computed.calories_max} kcal</span>
+            </div>
+          )}
+          {Number.isFinite(d.computed.protein_max_g) && (
+            <div className="flex justify-between text-[13px]">
+              <span className="text-[#666]">Protein</span>
+              <span className="text-white/80">{d.computed.protein_max_g}g</span>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -330,6 +370,50 @@ function RoutineActivationPreviewCard({ card }: { card: Card }) {
       <div className="text-xs font-semibold tracking-widest text-[#BFFF00] uppercase">Activate Routine</div>
       <div className="text-[14px] text-white/80">{d.routine_name}</div>
       <div className="text-[12px] text-[#666]">This will archive your current active routine.</div>
+    </div>
+  );
+}
+
+function NutritionPlanImportPreviewCard({ card }: { card: Card }) {
+  const d = card.data as {
+    targets?: Array<{ day_type: string; calories_min?: number | null; calories_max?: number | null; protein_min_g: number; protein_max_g: number; carbs_min_g: number; carbs_max_g: number; fats_min_g: number; fats_max_g: number }>;
+    rules?: Array<{ name: string; definition: string }>;
+    diet?: string | null;
+    goal?: string | null;
+    error?: string;
+  };
+  if (d.error) return <div className="text-[13px] text-red-400">{d.error}</div>;
+  return (
+    <div className="space-y-3">
+      {(d.targets ?? []).map((t, i) => (
+        <div key={i} className="space-y-1">
+          <div className="text-[11px] font-semibold text-[#666] uppercase tracking-wider">
+            {t.day_type === "default" ? "Targets" : `Targets · ${t.day_type} day`}
+          </div>
+          {(t.calories_min || t.calories_max) && (
+            <div className="text-[13px] text-white/80">{t.calories_min}–{t.calories_max} kcal</div>
+          )}
+          <div className="text-[13px] text-white/70">
+            P {t.protein_min_g}–{t.protein_max_g}g · C {t.carbs_min_g}–{t.carbs_max_g}g · F {t.fats_min_g}–{t.fats_max_g}g
+          </div>
+        </div>
+      ))}
+      {(d.rules ?? []).length > 0 && (
+        <div className="space-y-1">
+          <div className="text-[11px] font-semibold text-[#666] uppercase tracking-wider">Rules</div>
+          {(d.rules ?? []).map((r, i) => (
+            <div key={i} className="text-[13px] text-white/70">
+              <span className="text-white/80">{r.name}</span> — {r.definition}
+            </div>
+          ))}
+        </div>
+      )}
+      {d.diet && (
+        <div className="text-[12px] text-[#666]">Diet: <span className="text-white/70">{d.diet}</span></div>
+      )}
+      {d.goal && (
+        <div className="text-[12px] text-[#666]">Goal: <span className="text-white/70 capitalize">{d.goal}</span></div>
+      )}
     </div>
   );
 }

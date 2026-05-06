@@ -3,31 +3,50 @@ export interface LLMMessage {
   content: string;
 }
 
+function isRetryable(err: unknown): boolean {
+  const msg = String((err as Error)?.message ?? err);
+  return /LLM error (429|5\d\d)/.test(msg) || /fetch failed|ETIMEDOUT|ECONNRESET/i.test(msg);
+}
+
+async function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 export async function chatCompletion(
   messages: LLMMessage[],
   options?: { temperature?: number; max_tokens?: number }
 ): Promise<string> {
-  const res = await fetch(`${process.env.NVIDIA_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: process.env.LLM_MODEL || "deepseek-ai/deepseek-v3.2",
-      messages,
-      temperature: options?.temperature ?? 0.3,
-      max_tokens: options?.max_tokens ?? 1024,
-    }),
-  });
+  async function callOnce() {
+    const res = await fetch(`${process.env.NVIDIA_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.LLM_MODEL || "deepseek-ai/deepseek-v3.2",
+        messages,
+        temperature: options?.temperature ?? 0.3,
+        max_tokens: options?.max_tokens ?? 1024,
+      }),
+    });
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`LLM error ${res.status}: ${err}`);
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`LLM error ${res.status}: ${err}`);
+    }
+
+    const data = await res.json();
+    return data.choices[0].message.content as string;
   }
 
-  const data = await res.json();
-  return data.choices[0].message.content;
+  try {
+    return await callOnce();
+  } catch (err) {
+    if (!isRetryable(err)) throw err;
+    await sleep(600);
+    return await callOnce();
+  }
 }
 
 export async function chatCompletionJSON<T>(
@@ -146,41 +165,116 @@ export async function chatCompletionVision<T = string>(
   prompt: string,
   mimeType: string = "image/jpeg"
 ): Promise<T> {
-  const res = await fetch(`${process.env.NVIDIA_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: process.env.VISION_MODEL || "moonshotai/kimi-k2.5",
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
-            { type: "text", text: prompt },
-          ],
-        },
-      ],
-      temperature: 0.1,
-      max_tokens: 256,
-    }),
-  });
+  async function callOnce() {
+    const res = await fetch(`${process.env.NVIDIA_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.VISION_MODEL || "meta/llama-3.2-90b-vision-instruct",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
+              { type: "text", text: prompt },
+            ],
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 256,
+      }),
+    });
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Vision LLM error ${res.status}: ${err}`);
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Vision LLM error ${res.status}: ${err}`);
+    }
+
+    const data = await res.json();
+    const raw = data.choices[0].message.content as string;
+    const noThink = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+    const noFences = noThink.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const match = noFences.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+    if (!match) {
+      // Vision model returned prose — use it as the description so the caller can still proceed.
+      const prose = noFences.slice(0, 200);
+      console.warn(`[chatCompletionVision] No JSON in response, using prose as description: ${prose}`);
+      return { description: prose, category: "other" } as unknown as T;
+    }
+    return JSON.parse(match[0]) as T;
   }
 
-  const data = await res.json();
-  const raw = data.choices[0].message.content as string;
-  // Strip think blocks and fences (same as chatCompletionJSON)
-  const noThink = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-  const noFences = noThink.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-  const match = noFences.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-  if (!match) throw new Error(`No JSON in vision response: ${raw.slice(0, 200)}`);
-  return JSON.parse(match[0]) as T;
+  try {
+    return await callOnce();
+  } catch (err) {
+    if (!isRetryable(err)) throw err;
+    await sleep(600);
+    return await callOnce();
+  }
+}
+
+const NUTRITION_PLAN_PARSER_SYSTEM = `You are a nutrition plan parser. Extract macro targets, eating rules, diet type, and goal from the input text. Output ONLY raw JSON.
+
+Schema:
+{
+  "targets": [
+    {
+      "day_type": "default" | "training" | "rest",
+      "calories_min": number | null,
+      "calories_max": number | null,
+      "protein_min_g": number,
+      "protein_max_g": number,
+      "carbs_min_g": number,
+      "carbs_max_g": number,
+      "fats_min_g": number,
+      "fats_max_g": number
+    }
+  ],
+  "rules": [
+    { "name": string, "definition": string }
+  ],
+  "diet": string,
+  "goal": "cut" | "bulk" | "maintain" | "recomp"
+}
+
+RULES:
+1. targets[]: one entry per day_type. If only one set of macros is given, use day_type="default". If training-day vs rest-day splits are specified, emit separate entries.
+2. If a single number is given (e.g. "180g protein"), set min = max - 10, max = that number. If a range is given (e.g. "170-180g"), set min/max directly.
+3. calories_min / calories_max: if total daily calories ARE stated, extract them. If NOT stated, compute: kcal = protein_g*4 + carbs_g*4 + fats_g*9 using the min and max values. NEVER emit 0 for calories — use null only if macros are also absent.
+4. rules[]: extract any named eating behavior, protocol, timing rule, or food guideline. Give each a short name (2-4 words, title case) and a plain-English definition. Example: {"name":"Fiber Buffer","definition":"eat fiber before refined carbs"}.
+5. diet: any dietary pattern mentioned ("Mediterranean", "pescatarian", "vegan", "Desi"). Omit if unspecified.
+6. goal: cut (deficit), bulk (surplus), maintain (TDEE), recomp (same calories, high protein). Omit if unspecified.
+7. Omit any key that has no data. Return {"targets":[],"rules":[]} if nothing is found.`;
+
+export type ParsedNutritionPlanResult = {
+  targets: Array<{
+    day_type: "default" | "training" | "rest";
+    calories_min: number | null;
+    calories_max: number | null;
+    protein_min_g: number;
+    protein_max_g: number;
+    carbs_min_g: number;
+    carbs_max_g: number;
+    fats_min_g: number;
+    fats_max_g: number;
+  }>;
+  rules: Array<{ name: string; definition: string }>;
+  diet?: string;
+  goal?: "cut" | "bulk" | "maintain" | "recomp";
+};
+
+export async function parseNutritionPlan(text: string): Promise<ParsedNutritionPlanResult> {
+  const input = text.slice(0, 4000);
+  return chatCompletionJSON<ParsedNutritionPlanResult>(
+    [
+      { role: "system", content: NUTRITION_PLAN_PARSER_SYSTEM },
+      { role: "user", content: input },
+    ],
+    { temperature: 0.1, max_tokens: 1024 }
+  );
 }
 
 export async function parseRoutine(text: string): Promise<import("@/types").ParsedRoutineResult> {
