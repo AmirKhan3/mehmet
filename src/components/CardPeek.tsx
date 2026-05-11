@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import type { Card, ActionDescriptor } from "@/types";
 import { SchedulePlanCard } from "./SchedulePlanCard";
 import { WorkoutLoggedCard, WorkoutLogsCard } from "./WorkoutCard";
@@ -20,19 +21,26 @@ const PREVIEW_TYPES = new Set([
 interface Props {
   card: Card;
   onTap: (card: Card) => void;
-  onAction?: (card: Card, kind: ActionDescriptor["kind"], patch?: Record<string, unknown>) => void;
+  onAction?: (card: Card, kind: ActionDescriptor["kind"], patch?: Record<string, unknown>) => Promise<void>;
   /** @deprecated use onAction */
   onConfirm?: () => void;
 }
 
 export function CardPeek({ card, onTap, onAction, onConfirm }: Props) {
   const isPreview = PREVIEW_TYPES.has(card.type);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleAction = (kind: ActionDescriptor["kind"], patch?: Record<string, unknown>) => {
-    if (onAction) {
-      onAction(card, kind, patch);
-    } else if (kind === "confirm" && onConfirm) {
-      onConfirm();
+  const handleAction = async (kind: ActionDescriptor["kind"], patch?: Record<string, unknown>) => {
+    if (submitting && kind !== "edit") return;
+    if (kind !== "edit") setSubmitting(true);
+    try {
+      if (onAction) {
+        await onAction(card, kind, patch);
+      } else if (kind === "confirm" && onConfirm) {
+        onConfirm();
+      }
+    } finally {
+      if (kind !== "edit") setSubmitting(false);
     }
   };
 
@@ -52,7 +60,7 @@ export function CardPeek({ card, onTap, onAction, onConfirm }: Props) {
         <div className="mt-3 text-[11px] text-[#444]">Tap to expand →</div>
       )}
       {isPreview && card.pending_id && card.actions && card.actions.length > 0 && (
-        <ActionBar actions={card.actions} onAction={handleAction} />
+        <ActionBar actions={card.actions} onAction={handleAction} submitting={submitting} />
       )}
     </div>
   );
@@ -61,14 +69,16 @@ export function CardPeek({ card, onTap, onAction, onConfirm }: Props) {
 function ActionBar({
   actions,
   onAction,
+  submitting,
 }: {
   actions: ActionDescriptor[];
   onAction: (kind: ActionDescriptor["kind"], patch?: Record<string, unknown>) => void;
+  submitting: boolean;
 }) {
   return (
     <div className="flex gap-2 mt-4 pt-3 border-t border-[#1A1A1A]">
       {actions.map((a) => (
-        <ActionButton key={a.kind} descriptor={a} onAction={onAction} />
+        <ActionButton key={a.kind} descriptor={a} onAction={onAction} submitting={submitting} />
       ))}
     </div>
   );
@@ -77,9 +87,11 @@ function ActionBar({
 function ActionButton({
   descriptor,
   onAction,
+  submitting,
 }: {
   descriptor: ActionDescriptor;
   onAction: (kind: ActionDescriptor["kind"], patch?: Record<string, unknown>) => void;
+  submitting: boolean;
 }) {
   const { kind, label } = descriptor;
 
@@ -87,9 +99,10 @@ function ActionButton({
     return (
       <button
         onClick={() => onAction("confirm")}
-        className="flex-1 text-[12px] font-semibold text-black bg-[#BFFF00] px-3 py-1.5 rounded-lg hover:bg-[#d4ff33] transition-colors"
+        disabled={submitting}
+        className="flex-1 text-[12px] font-semibold text-black bg-[#BFFF00] px-3 py-1.5 rounded-lg hover:bg-[#d4ff33] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        {label}
+        {submitting ? "…" : label}
       </button>
     );
   }
@@ -97,13 +110,14 @@ function ActionButton({
     return (
       <button
         onClick={() => onAction("cancel")}
-        className="flex-1 text-[12px] font-medium text-[#666] border border-[#2A2A2A] px-3 py-1.5 rounded-lg hover:bg-[#1A1A1A] transition-colors"
+        disabled={submitting}
+        className="flex-1 text-[12px] font-medium text-[#666] border border-[#2A2A2A] px-3 py-1.5 rounded-lg hover:bg-[#1A1A1A] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        {label}
+        {submitting ? "…" : label}
       </button>
     );
   }
-  // edit — clicking sends the edit kind; the parent handles showing an edit UI
+  // edit — not locked during submitting; edits don't commit
   return (
     <button
       onClick={() => onAction("edit")}

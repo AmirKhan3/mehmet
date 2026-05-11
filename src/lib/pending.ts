@@ -43,31 +43,14 @@ export async function resolvePendingAction(
   action: "confirm" | "cancel" | "edit",
   patch?: Record<string, unknown>
 ): Promise<ResolvePendingResult> {
-  const row = await queryOne(
-    `SELECT id, type, payload, status, expires_at FROM pending_actions WHERE id = $1 AND athlete_profile_id = $2`,
-    [pendingId, athleteId]
-  ) as PendingRow | null;
-
-  if (!row) throw Object.assign(new Error("Pending action not found"), { statusCode: 404 });
-  if (row.status !== "pending") throw Object.assign(new Error(`Action already ${row.status}`), { statusCode: 409 });
-  if (row.expires_at && new Date(row.expires_at) < new Date()) {
-    await query(`UPDATE pending_actions SET status = 'expired', resolved_at = NOW() WHERE id = $1`, [pendingId]);
-    throw Object.assign(new Error("Preview expired — start over"), { statusCode: 410 });
-  }
-
-  if (action === "cancel") {
-    await query(`UPDATE pending_actions SET status = 'cancelled', resolved_at = NOW() WHERE id = $1`, [pendingId]);
-    if (row.type === "import_routine") {
-      const ids = (row.payload.routine_ids as number[]) || [];
-      for (const id of ids) {
-        await query(`DELETE FROM routines WHERE id = $1 AND status = 'draft' AND athlete_profile_id = $2`, [id, athleteId]);
-      }
-    }
-    const card = buildPreviewCard(row.type, row.payload, pendingId);
-    return { text: "Cancelled.", card: { type: "confirmation", title: "Cancelled", data: { outcome: "cancelled", pending_id: pendingId, original: card.data } } };
-  }
-
+  // edit: row must exist and be pending, but we don't change status
   if (action === "edit") {
+    const row = await queryOne(
+      `SELECT id, type, payload, status FROM pending_actions WHERE id = $1 AND athlete_profile_id = $2`,
+      [pendingId, athleteId]
+    ) as PendingRow | null;
+    if (!row) throw Object.assign(new Error("Pending action not found"), { statusCode: 404 });
+    if (row.status !== "pending") throw Object.assign(new Error(`Action already ${row.status}`), { statusCode: 409 });
     if (!patch || Object.keys(patch).length === 0) {
       throw Object.assign(new Error("No patch provided"), { statusCode: 400 });
     }
@@ -88,7 +71,59 @@ export async function resolvePendingAction(
     return { text: "", card };
   }
 
-  // confirm
+  // cancel: atomic single UPDATE — only succeeds if status is 'pending'
+  if (action === "cancel") {
+    const row = await queryOne(
+      `UPDATE pending_actions
+          SET status = 'cancelled', resolved_at = NOW()
+        WHERE id = $1
+          AND athlete_profile_id = $2
+          AND status = 'pending'
+       RETURNING id, type, payload`,
+      [pendingId, athleteId]
+    ) as PendingRow | null;
+    if (!row) {
+      const existing = await queryOne(
+        `SELECT status FROM pending_actions WHERE id = $1 AND athlete_profile_id = $2`,
+        [pendingId, athleteId]
+      );
+      if (!existing) throw Object.assign(new Error("Pending action not found"), { statusCode: 404 });
+      throw Object.assign(new Error(`Action already ${existing.status}`), { statusCode: 409 });
+    }
+    if (row.type === "import_routine") {
+      const ids = (row.payload.routine_ids as number[]) || [];
+      for (const id of ids) {
+        await query(`DELETE FROM routines WHERE id = $1 AND status = 'draft' AND athlete_profile_id = $2`, [id, athleteId]);
+      }
+    }
+    const card = buildPreviewCard(row.type, row.payload, pendingId);
+    return { text: "Cancelled.", card: { type: "confirmation", title: "Cancelled", data: { outcome: "cancelled", pending_id: pendingId, original: card.data } } };
+  }
+
+  // confirm: atomically claim the row, then commit, then mark confirmed
+  // 'claimed' status prevents a concurrent confirm from double-committing
+  const row = await queryOne(
+    `UPDATE pending_actions
+        SET status = 'claimed'
+      WHERE id = $1
+        AND athlete_profile_id = $2
+        AND status = 'pending'
+        AND (expires_at IS NULL OR expires_at > NOW())
+     RETURNING id, type, payload, expires_at`,
+    [pendingId, athleteId]
+  ) as PendingRow | null;
+  if (!row) {
+    const existing = await queryOne(
+      `SELECT status, expires_at FROM pending_actions WHERE id = $1 AND athlete_profile_id = $2`,
+      [pendingId, athleteId]
+    );
+    if (!existing) throw Object.assign(new Error("Pending action not found"), { statusCode: 404 });
+    if (existing.expires_at && new Date(existing.expires_at as string) < new Date()) {
+      throw Object.assign(new Error("Preview expired — start over"), { statusCode: 410 });
+    }
+    throw Object.assign(new Error(`Action already ${existing.status}`), { statusCode: 409 });
+  }
+
   const commitFn = COMMIT_FNS[row.type];
   if (!commitFn) throw new Error(`No commit handler for type: ${row.type}`);
 

@@ -216,7 +216,7 @@ export function Chat() {
     card: Card,
     kind: "confirm" | "cancel" | "edit",
     patch?: Record<string, unknown>
-  ) => {
+  ): Promise<void> => {
     const pendingId = card.pending_id;
     if (!pendingId) return;
 
@@ -227,7 +227,13 @@ export function Chat() {
         body: JSON.stringify({ pending_id: pendingId, action: kind, patch }),
       });
       const data = await res.json() as { text?: string; card?: Card; error?: string };
-      if (data.error) return;
+      if (data.error) {
+        setMessages((prev) => [...prev, {
+          id: genId(), role: "assistant",
+          text: data.error!, cards: [], timestamp: Date.now(),
+        }]);
+        return;
+      }
 
       if (kind === "edit" && data.card) {
         // Update the card in-place — find and replace the message containing this pending_id
@@ -244,7 +250,7 @@ export function Chat() {
         }]);
       }
     } catch {
-      // silent — don't disrupt the UI on transient errors
+      // silent — don't disrupt the UI on transient network errors
     }
   }, []);
 
