@@ -3,7 +3,7 @@ import { parseRoutine } from "../llm";
 import { buildPreviewCard } from "../pending";
 import type { Card, ParsedBlock, ParsedDay, ParsedExercise, ParsedRoutine } from "@/types";
 
-const EXPIRES_MINUTES = 30;
+const EXPIRES_MINUTES = 120;
 
 function slugify(name: string): string {
   return name

@@ -3,7 +3,7 @@ import { chatCompletionJSON, parseNutritionPlan } from "../llm";
 import { buildPreviewCard } from "../pending";
 import type { Card } from "@/types";
 
-const EXPIRES_MINUTES = 30;
+const EXPIRES_MINUTES = 120;
 
 interface MacroEstimate {
   calories: number;

@@ -2,7 +2,7 @@ import { query, queryOne } from "../db";
 import { buildPreviewCard } from "../pending";
 import type { Card } from "@/types";
 
-const EXPIRES_MINUTES = 30;
+const EXPIRES_MINUTES = 120;
 
 const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
