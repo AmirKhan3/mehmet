@@ -1,6 +1,7 @@
 "use client";
 import { motion, AnimatePresence, PanInfo } from "framer-motion";
 import type { Card } from "@/types";
+import { useIsMobile } from "@/lib/hooks/useIsMobile";
 import { SchedulePlanDetail } from "./SchedulePlanCard";
 import { WorkoutLogsDetail, WorkoutLoggedDetail } from "./WorkoutCard";
 import { NutritionTargetsDetail, NutritionDayDetail, NutritionItemDetail, MealSuggestionDetail, NutritionSetupDetail, NutritionWeekDetail } from "./NutritionCard";
@@ -13,8 +14,10 @@ interface Props {
 }
 
 export function CardDetail({ card, onClose, onEditEntry }: Props) {
+  const isMobile = useIsMobile();
+
   function handleDragEnd(_: unknown, info: PanInfo) {
-    if (info.offset.x > 80) onClose();
+    if (isMobile ? info.offset.y > 120 : info.offset.x > 80) onClose();
   }
 
   return (
@@ -31,25 +34,34 @@ export function CardDetail({ card, onClose, onEditEntry }: Props) {
           />
           <motion.div
             key="panel"
-            initial={{ x: "100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "100%" }}
+            initial={isMobile ? { y: "100%" } : { x: "100%" }}
+            animate={isMobile ? { y: 0 } : { x: 0 }}
+            exit={isMobile ? { y: "100%" } : { x: "100%" }}
             transition={{ type: "spring", damping: 28, stiffness: 280 }}
-            drag="x"
-            dragConstraints={{ left: 0, right: 400 }}
-            dragElastic={{ left: 0, right: 0.4 }}
+            drag={isMobile ? "y" : "x"}
+            dragConstraints={isMobile ? { top: 0, bottom: 0 } : { left: 0, right: 400 }}
+            dragElastic={isMobile ? { top: 0, bottom: 0.4 } : { left: 0, right: 0.4 }}
             onDragEnd={handleDragEnd}
-            className="fixed right-0 top-0 bottom-0 w-[92vw] max-w-md bg-[#0A0A0A] border-l border-[#1A1A1A] z-50 overflow-y-auto"
+            className={isMobile
+              ? "fixed inset-x-0 bottom-0 max-h-[85vh] rounded-t-2xl bg-[#0A0A0A] border-t border-[#1A1A1A] z-50 overflow-y-auto"
+              : "fixed right-0 top-0 bottom-0 w-[92vw] max-w-md bg-[#0A0A0A] border-l border-[#1A1A1A] z-50 overflow-y-auto"}
           >
-            <div className="flex items-center px-6 pt-6 pb-2">
+            {isMobile && (
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-10 h-1 rounded-full bg-[#333]" />
+              </div>
+            )}
+            <div className="flex items-center px-6 pt-4 pb-2">
               <button
                 onClick={onClose}
                 className="flex items-center gap-1.5 text-[#666] hover:text-white transition-colors text-[13px]"
               >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M10 12L6 8L10 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Back
+                {!isMobile && (
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M10 12L6 8L10 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+                {isMobile ? "Close" : "Back"}
               </button>
             </div>
             <DetailContent card={card} onEditEntry={onEditEntry} />

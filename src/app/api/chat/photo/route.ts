@@ -50,8 +50,8 @@ Return ONLY JSON — no explanation, no markdown:
   // Persist what the user actually sent (the display text in chat).
   const persistedUserText = userText ? `📷 ${userText}` : "📷 pasted image";
   await query(
-    `INSERT INTO chat_messages (role, text, cards_json) VALUES ('user', $1, '[]'::jsonb)`,
-    [persistedUserText]
+    `INSERT INTO chat_messages (role, text, cards_json, athlete_profile_id) VALUES ('user', $1, '[]'::jsonb, $2)`,
+    [persistedUserText, athleteId]
   );
 
   let text: string;
@@ -66,8 +66,8 @@ Return ONLY JSON — no explanation, no markdown:
   }
 
   await query(
-    `INSERT INTO chat_messages (role, text, cards_json) VALUES ('assistant', $1, $2::jsonb)`,
-    [text, JSON.stringify(cards)]
+    `INSERT INTO chat_messages (role, text, cards_json, athlete_profile_id) VALUES ('assistant', $1, $2::jsonb, $3)`,
+    [text, JSON.stringify(cards), athleteId]
   );
 
   return NextResponse.json({ text, cards });

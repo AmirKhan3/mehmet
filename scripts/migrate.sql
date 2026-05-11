@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS athlete_profile (
   height NUMERIC,
   weight NUMERIC,
   goals TEXT,
-  preferences JSONB DEFAULT '{}'
+  preferences JSONB DEFAULT '{}',
+  guest_cookie_id TEXT UNIQUE
 );
 
 INSERT INTO athlete_profile (id, name) VALUES (1, 'Athlete') ON CONFLICT (id) DO NOTHING;
@@ -121,8 +122,12 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   cards_json JSONB DEFAULT '[]',
   tool_requests JSONB,
   tool_results JSONB,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  athlete_profile_id INTEGER REFERENCES athlete_profile(id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_athlete
+  ON chat_messages (athlete_profile_id, id DESC);
 
 CREATE TABLE IF NOT EXISTS assistant_memory (
   id SERIAL PRIMARY KEY,

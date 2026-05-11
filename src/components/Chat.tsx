@@ -1,7 +1,7 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { signOut } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 import { CardPeek } from "./CardPeek";
 import { CardDetail } from "./CardDetail";
 import type { Message, Card } from "@/types";
@@ -58,6 +58,7 @@ export function Chat() {
   const [pendingImage, setPendingImage] = useState<File | null>(null);
   const [pendingImageUrl, setPendingImageUrl] = useState<string | null>(null);
   const [starters, setStarters] = useState<string[]>(DEFAULT_STARTERS);
+  const { data: session } = useSession();
   const [profileOpen, setProfileOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -305,65 +306,74 @@ export function Chat() {
           <div className="text-[11px] font-semibold tracking-[0.2em] text-[#BFFF00] uppercase">Strong</div>
           <div className="text-[13px] text-[#444]">Training partner</div>
         </div>
-        <div className="relative" ref={profileMenuRef}>
-          <button
-            onClick={() => setProfileOpen((o) => !o)}
-            className="w-8 h-8 rounded-full bg-[#111] border border-[#222] flex items-center justify-center hover:border-[#444] transition-colors"
-            title="Profile"
-          >
-            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-              <circle cx="7.5" cy="5" r="2.5" stroke="#666" strokeWidth="1.2"/>
-              <path d="M2 13c0-3 2.5-5 5.5-5s5.5 2 5.5 5" stroke="#666" strokeWidth="1.2" strokeLinecap="round"/>
-            </svg>
-          </button>
+        {session ? (
+          <div className="relative" ref={profileMenuRef}>
+            <button
+              onClick={() => setProfileOpen((o) => !o)}
+              className="w-8 h-8 rounded-full bg-[#111] border border-[#222] flex items-center justify-center hover:border-[#444] transition-colors"
+              title="Profile"
+            >
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+                <circle cx="7.5" cy="5" r="2.5" stroke="#666" strokeWidth="1.2"/>
+                <path d="M2 13c0-3 2.5-5 5.5-5s5.5 2 5.5 5" stroke="#666" strokeWidth="1.2" strokeLinecap="round"/>
+              </svg>
+            </button>
 
-          <AnimatePresence>
-            {profileOpen && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                transition={{ duration: 0.12 }}
-                className="absolute right-0 top-10 w-44 bg-[#111] border border-[#222] rounded-2xl overflow-hidden shadow-xl z-50"
-              >
-                <a
-                  href="/logs"
-                  className="flex items-center gap-3 px-4 py-3 text-[13px] text-[#999] hover:text-white hover:bg-[#1A1A1A] transition-colors"
-                  onClick={() => setProfileOpen(false)}
+            <AnimatePresence>
+              {profileOpen && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                  transition={{ duration: 0.12 }}
+                  className="absolute right-0 top-10 w-44 bg-[#111] border border-[#222] rounded-2xl overflow-hidden shadow-xl z-50"
                 >
-                  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-                    <path d="M2 4h10M2 7h7M2 10h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                  </svg>
-                  Logs
-                </a>
-                <a
-                  href="/routines"
-                  className="flex items-center gap-3 px-4 py-3 text-[13px] text-[#999] hover:text-white hover:bg-[#1A1A1A] transition-colors"
-                  onClick={() => setProfileOpen(false)}
-                >
-                  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-                    <rect x="2" y="2" width="4" height="4" rx="0.8" stroke="currentColor" strokeWidth="1.2"/>
-                    <rect x="8" y="2" width="4" height="4" rx="0.8" stroke="currentColor" strokeWidth="1.2"/>
-                    <rect x="2" y="8" width="4" height="4" rx="0.8" stroke="currentColor" strokeWidth="1.2"/>
-                    <rect x="8" y="8" width="4" height="4" rx="0.8" stroke="currentColor" strokeWidth="1.2"/>
-                  </svg>
-                  Routines
-                </a>
-                <div className="border-t border-[#1A1A1A]" />
-                <button
-                  onClick={() => signOut({ callbackUrl: "/login" })}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-[13px] text-[#666] hover:text-[#ff6b6b] hover:bg-[#1A1A1A] transition-colors"
-                >
-                  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-                    <path d="M5 7h7M9.5 4.5 12 7l-2.5 2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M8 2H3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                  </svg>
-                  Sign out
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+                  <a
+                    href="/logs"
+                    className="flex items-center gap-3 px-4 py-3 text-[13px] text-[#999] hover:text-white hover:bg-[#1A1A1A] transition-colors"
+                    onClick={() => setProfileOpen(false)}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                      <path d="M2 4h10M2 7h7M2 10h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                    </svg>
+                    Logs
+                  </a>
+                  <a
+                    href="/routines"
+                    className="flex items-center gap-3 px-4 py-3 text-[13px] text-[#999] hover:text-white hover:bg-[#1A1A1A] transition-colors"
+                    onClick={() => setProfileOpen(false)}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                      <rect x="2" y="2" width="4" height="4" rx="0.8" stroke="currentColor" strokeWidth="1.2"/>
+                      <rect x="8" y="2" width="4" height="4" rx="0.8" stroke="currentColor" strokeWidth="1.2"/>
+                      <rect x="2" y="8" width="4" height="4" rx="0.8" stroke="currentColor" strokeWidth="1.2"/>
+                      <rect x="8" y="8" width="4" height="4" rx="0.8" stroke="currentColor" strokeWidth="1.2"/>
+                    </svg>
+                    Routines
+                  </a>
+                  <div className="border-t border-[#1A1A1A]" />
+                  <button
+                    onClick={() => signOut({ callbackUrl: "/login" })}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-[13px] text-[#666] hover:text-[#ff6b6b] hover:bg-[#1A1A1A] transition-colors"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                      <path d="M5 7h7M9.5 4.5 12 7l-2.5 2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M8 2H3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                    </svg>
+                    Sign out
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        ) : (
+          <a
+            href="/login"
+            className="px-3 h-8 rounded-full bg-[#BFFF00] text-black text-[13px] font-semibold flex items-center hover:bg-[#a8e000] transition-colors"
+          >
+            Sign up
+          </a>
+        )}
       </div>
 
       {/* Messages */}
@@ -418,6 +428,11 @@ export function Chat() {
                   `}
                 >
                   {msg.text}
+                </div>
+              )}
+              {msg.timestamp && (
+                <div className={`text-[10px] text-[#444] px-1 ${msg.role === "user" ? "self-end" : "self-start"}`}>
+                  {new Date(msg.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
                 </div>
               )}
               {msg.cards?.map((card, i) => (

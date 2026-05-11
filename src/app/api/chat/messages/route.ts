@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { getCurrentAthleteId } from "@/lib/session";
 
 export async function GET() {
   try {
+    const athleteId = await getCurrentAthleteId();
     const rows = await query(
       `SELECT id, role, text, cards_json, created_at
        FROM (
          SELECT id, role, text, cards_json, created_at
          FROM chat_messages
+         WHERE athlete_profile_id = $1
          ORDER BY id DESC
          LIMIT 60
        ) recent
-       ORDER BY id ASC`
+       ORDER BY id ASC`,
+      [athleteId]
     );
     const messages = rows.map((r) => ({
       id: String(r.id),
